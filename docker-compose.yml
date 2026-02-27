@@ -7,7 +7,7 @@ services:
       - "8299:8299"
     volumes:
       - linernotes_data:/data
-      - /mnt/MediaData/Music2:/music:ro
+      - /mnt/MediaData/Music2:/music
       - /mnt/MediaData/Playlists:/playlists
     environment:
       - LINERNOTES_DATA=/data

@@ -40,7 +40,7 @@
             </li>
             {% for gc in genre_counts %}
             <li>
-                <a href="/?genre={{ gc.genre }}"
+                <a href="/?genre={{ gc.genre|urlencode }}"
                    class="{% if selected_genre == gc.genre %}active{% endif %}">
                     {{ gc.genre }} <span class="badge">{{ gc.count }}</span>
                 </a>

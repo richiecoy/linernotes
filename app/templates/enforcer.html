@@ -4,11 +4,17 @@
 {% block content %}
 <div class="page-header">
     <h1>Metadata Enforcer</h1>
-    <div class="page-actions" x-data="{ running: false }">
-        <button class="btn btn-primary" @click="running = true; fetch('/enforcer/run', {method:'POST'})"
-                :disabled="running">
-            <span x-text="running ? 'Running...' : 'Run Now'"></span>
+    <div class="page-actions" x-data="enforcerActions()" x-init="checkStatus()">
+        <button class="btn btn-primary" @click="runDryRun()" :disabled="running">
+            <span x-text="running ? `Checking ${progress}/${total} — ${currentArtist}` : 'Dry Run'"></span>
         </button>
+        <button class="btn btn-danger" @click="runApply()" :disabled="running"
+                title="Write genre tags to files">
+            Apply Changes
+        </button>
+        <template x-if="lastResult && !running">
+            <span class="scan-result" x-text="resultSummary"></span>
+        </template>
     </div>
 </div>
 
@@ -18,8 +24,12 @@
         <span class="stat-label">Tracks Checked</span>
     </div>
     <div class="stat-card">
+        <span class="stat-value success">{{ tracks_correct }}</span>
+        <span class="stat-label">Correct</span>
+    </div>
+    <div class="stat-card">
         <span class="stat-value {% if pending_updates > 0 %}warning{% endif %}">{{ pending_updates }}</span>
-        <span class="stat-label">Pending Updates</span>
+        <span class="stat-label">Need Update</span>
     </div>
     <div class="stat-card">
         <span class="stat-value">{{ 'ON' if dry_run else 'OFF' }}</span>
@@ -33,19 +43,17 @@
     <table class="data-table">
         <thead>
             <tr>
-                <th>Time</th>
                 <th>Artist</th>
                 <th>Album</th>
                 <th>Track</th>
-                <th>Old</th>
-                <th>New</th>
+                <th>Old Genre</th>
+                <th>New Genre</th>
                 <th>Status</th>
             </tr>
         </thead>
         <tbody>
             {% for log in logs %}
             <tr>
-                <td class="nowrap">{{ log.created_at }}</td>
                 <td>{{ log.artist_name }}</td>
                 <td>{{ log.album_name }}</td>
                 <td>{{ log.track_filename }}</td>
@@ -58,8 +66,69 @@
     </table>
     {% else %}
     <div class="empty-state">
-        <p>No enforcer activity yet. Run the enforcer to check metadata.</p>
+        <p>No enforcer activity yet. Run a dry run to preview changes.</p>
     </div>
     {% endif %}
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function enforcerActions() {
+    return {
+        running: false, progress: 0, total: 0, currentArtist: '', lastResult: null,
+        pollInterval: null,
+
+        get resultSummary() {
+            if (!this.lastResult) return '';
+            const r = this.lastResult;
+            if (r.error) return `Error: ${r.error}`;
+            const mode = r.dry_run ? 'Dry run' : 'Applied';
+            return `${mode}: ${r.tracks_checked} checked, ${r.tracks_mismatched} mismatched, ${r.tracks_updated} updated`;
+        },
+
+        async runDryRun() {
+            const resp = await fetch('/enforcer/run', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                this.running = true;
+                this.startPolling();
+            }
+        },
+
+        async runApply() {
+            if (!confirm('This will write genre tags to your audio files. Continue?')) return;
+            const resp = await fetch('/enforcer/run?apply=true', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                this.running = true;
+                this.startPolling();
+            }
+        },
+
+        async checkStatus() {
+            const resp = await fetch('/enforcer/status');
+            const data = await resp.json();
+            this.running = data.running;
+            this.progress = data.progress;
+            this.total = data.total;
+            this.currentArtist = data.current_artist;
+            this.lastResult = data.last_result;
+            if (this.running) this.startPolling();
+        },
+
+        startPolling() {
+            if (this.pollInterval) return;
+            this.pollInterval = setInterval(async () => {
+                await this.checkStatus();
+                if (!this.running) {
+                    clearInterval(this.pollInterval);
+                    this.pollInterval = null;
+                    window.location.reload();
+                }
+            }, 2000);
+        }
+    };
+}
+</script>
 {% endblock %}

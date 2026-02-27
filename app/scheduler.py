@@ -71,8 +71,19 @@ async def run_library_scan():
 async def run_metadata_enforcer():
     """Scheduled metadata enforcer job."""
     logger.info("Scheduled metadata enforcer starting...")
-    # Will be wired to metadata_enforcer service in phase 6
-    logger.info("Metadata enforcer placeholder complete")
+    from app.database import get_db, get_setting
+    from app.services.enforcer import run_enforcer
+
+    music_path = await get_setting("library_path", "/music")
+    dry_run = (await get_setting("enforcer_dry_run", "true")) == "true"
+    db = await get_db()
+    try:
+        stats = await run_enforcer(db, music_path, dry_run=dry_run)
+        logger.info("Scheduled enforcer complete: %s", stats)
+    except Exception as e:
+        logger.error("Scheduled enforcer failed: %s", e)
+    finally:
+        await db.close()
 
 
 async def run_playlist_generator():

@@ -232,6 +232,8 @@ a:hover { color: var(--accent-hover); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-hover); }
+.btn-danger { background: #e74c3c; color: #fff; }
+.btn-danger:hover { background: #c0392b; }
 .btn-secondary { background: var(--bg-tertiary); }
 .btn-small { padding: 4px 10px; font-size: 12px; }
 
@@ -483,6 +485,7 @@ a:hover { color: var(--accent-hover); }
 
 .stat-value { display: block; font-size: 28px; font-weight: 700; }
 .stat-value.warning { color: var(--warning); }
+.stat-value.success { color: var(--success); }
 .stat-label { font-size: 12px; color: var(--text-muted); }
 
 /* ---- Data Tables ---- */
@@ -525,6 +528,9 @@ code {
 }
 
 .status-updated { background: var(--success); color: #1a1d27; }
+.status-pending { background: var(--warning); color: #1a1d27; }
+.status-applied { background: var(--success); color: #1a1d27; }
+.status-failed { background: #e74c3c; color: #fff; }
 .status-skipped { background: var(--bg-tertiary); color: var(--text-muted); }
 .status-error { background: var(--error); color: #fff; }
 .status-dry_run { background: var(--warning); color: #1a1d27; }
