@@ -118,6 +118,8 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
         'tracks_found': 0,
         'tracks_new': 0,
         'tracks_updated': 0,
+        'artists_removed': 0,
+        'albums_removed': 0,
         'errors': 0,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'finished_at': None,
@@ -275,10 +277,46 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
 
     stats['finished_at'] = datetime.now(timezone.utc).isoformat()
 
+    # Cleanup: remove artists/albums no longer on disk
+    cursor = await db.execute("SELECT id, name FROM artists")
+    all_db_artists = await cursor.fetchall()
+    artists_removed = 0
+    albums_removed = 0
+
+    for db_artist in all_db_artists:
+        artist_path = os.path.join(music_path, db_artist['name'])
+        if not os.path.isdir(artist_path):
+            # Artist folder gone — remove artist and all their library albums/tracks
+            await db.execute("DELETE FROM tracks WHERE album_id IN (SELECT id FROM albums WHERE artist_id = ?)", (db_artist['id'],))
+            await db.execute("DELETE FROM albums WHERE artist_id = ?", (db_artist['id'],))
+            await db.execute("DELETE FROM artists WHERE id = ?", (db_artist['id'],))
+            artists_removed += 1
+            logger.info("Removed stale artist: %s", db_artist['name'])
+        else:
+            # Check for removed albums
+            cursor2 = await db.execute(
+                "SELECT id, folder_name FROM albums WHERE artist_id = ? AND in_library = 1",
+                (db_artist['id'],)
+            )
+            db_albums = await cursor2.fetchall()
+            for db_album in db_albums:
+                album_path = os.path.join(artist_path, db_album['folder_name'])
+                if not os.path.isdir(album_path):
+                    await db.execute("DELETE FROM tracks WHERE album_id = ?", (db_album['id'],))
+                    await db.execute("DELETE FROM albums WHERE id = ?", (db_album['id'],))
+                    albums_removed += 1
+                    logger.info("Removed stale album: %s - %s", db_artist['name'], db_album['folder_name'])
+
+    if artists_removed or albums_removed:
+        await db.commit()
+
+    stats['artists_removed'] = artists_removed
+    stats['albums_removed'] = albums_removed
+
     logger.info(
-        "Scan complete: %d artists (%d new), %d albums (%d new), %d tracks (%d new, %d updated), %d errors",
-        stats['artists_found'], stats['artists_new'],
-        stats['albums_found'], stats['albums_new'],
+        "Scan complete: %d artists (%d new, %d removed), %d albums (%d new, %d removed), %d tracks (%d new, %d updated), %d errors",
+        stats['artists_found'], stats['artists_new'], stats['artists_removed'],
+        stats['albums_found'], stats['albums_new'], stats['albums_removed'],
         stats['tracks_found'], stats['tracks_new'], stats['tracks_updated'],
         stats['errors']
     )
