@@ -117,9 +117,9 @@ CREATE INDEX IF NOT EXISTS idx_playlist_exclusions_playlist ON playlist_exclusio
 # Default settings
 DEFAULT_SETTINGS = {
     "library_path": "/music",
-    "scan_schedule_hours": "24",
-    "enforcer_schedule_hours": "24",
-    "playlist_schedule_hours": "24",
+    "scan_schedule_time": "02:00",
+    "enforcer_schedule_time": "03:00",
+    "playlist_schedule_time": "04:00",
     "enforcer_dry_run": "true",
     "mb_cache_days": "30",
     "navidrome_url": "",

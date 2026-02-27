@@ -3,7 +3,7 @@ LinerNotes Scheduler
 """
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger("linernotes.scheduler")
 
@@ -14,15 +14,19 @@ async def init_scheduler():
     """Initialize and start the scheduler with jobs from settings."""
     from app.database import get_setting
 
-    # Get intervals from settings
-    scan_hours = int(await get_setting("scan_schedule_hours", "24"))
-    enforcer_hours = int(await get_setting("enforcer_schedule_hours", "24"))
-    playlist_hours = int(await get_setting("playlist_schedule_hours", "24"))
+    # Get schedule times (HH:MM format)
+    scan_time = await get_setting("scan_schedule_time", "02:00")
+    enforcer_time = await get_setting("enforcer_schedule_time", "03:00")
+    playlist_time = await get_setting("playlist_schedule_time", "04:00")
+
+    scan_h, scan_m = _parse_time(scan_time)
+    enforcer_h, enforcer_m = _parse_time(enforcer_time)
+    playlist_h, playlist_m = _parse_time(playlist_time)
 
     # Library scan job
     scheduler.add_job(
         run_library_scan,
-        trigger=IntervalTrigger(hours=scan_hours),
+        trigger=CronTrigger(hour=scan_h, minute=scan_m),
         id="library_scan",
         name="Library Scan",
         replace_existing=True,
@@ -31,7 +35,7 @@ async def init_scheduler():
     # Metadata enforcer job
     scheduler.add_job(
         run_metadata_enforcer,
-        trigger=IntervalTrigger(hours=enforcer_hours),
+        trigger=CronTrigger(hour=enforcer_h, minute=enforcer_m),
         id="metadata_enforcer",
         name="Metadata Enforcer",
         replace_existing=True,
@@ -40,15 +44,24 @@ async def init_scheduler():
     # Playlist generator job
     scheduler.add_job(
         run_playlist_generator,
-        trigger=IntervalTrigger(hours=playlist_hours),
+        trigger=CronTrigger(hour=playlist_h, minute=playlist_m),
         id="playlist_generator",
         name="Playlist Generator",
         replace_existing=True,
     )
 
     scheduler.start()
-    logger.info("Scheduler started with scan=%dh, enforcer=%dh, playlists=%dh",
-                scan_hours, enforcer_hours, playlist_hours)
+    logger.info("Scheduler started: scan=%s, enforcer=%s, playlists=%s",
+                scan_time, enforcer_time, playlist_time)
+
+
+def _parse_time(time_str: str) -> tuple:
+    """Parse HH:MM string into (hour, minute) ints."""
+    try:
+        parts = time_str.strip().split(":")
+        return int(parts[0]), int(parts[1])
+    except (ValueError, IndexError):
+        return 2, 0  # default 2:00 AM
 
 
 async def run_library_scan():

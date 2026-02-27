@@ -25,21 +25,22 @@
     <!-- Schedules -->
     <fieldset>
         <legend>Schedules</legend>
+        <span class="help-text">Daily run times (24-hour format, container timezone)</span>
         <div class="form-row">
             <div class="form-group">
-                <label for="scan_schedule_hours">Library Scan Interval (hours)</label>
-                <input type="number" id="scan_schedule_hours" name="scan_schedule_hours"
-                       value="{{ settings.scan_schedule_hours }}" min="1" max="168">
+                <label for="scan_schedule_time">Library Scan</label>
+                <input type="time" id="scan_schedule_time" name="scan_schedule_time"
+                       value="{{ settings.scan_schedule_time }}">
             </div>
             <div class="form-group">
-                <label for="enforcer_schedule_hours">Enforcer Interval (hours)</label>
-                <input type="number" id="enforcer_schedule_hours" name="enforcer_schedule_hours"
-                       value="{{ settings.enforcer_schedule_hours }}" min="1" max="168">
+                <label for="enforcer_schedule_time">Metadata Enforcer</label>
+                <input type="time" id="enforcer_schedule_time" name="enforcer_schedule_time"
+                       value="{{ settings.enforcer_schedule_time }}">
             </div>
             <div class="form-group">
-                <label for="playlist_schedule_hours">Playlist Interval (hours)</label>
-                <input type="number" id="playlist_schedule_hours" name="playlist_schedule_hours"
-                       value="{{ settings.playlist_schedule_hours }}" min="1" max="168">
+                <label for="playlist_schedule_time">Playlist Generator</label>
+                <input type="time" id="playlist_schedule_time" name="playlist_schedule_time"
+                       value="{{ settings.playlist_schedule_time }}">
             </div>
         </div>
     </fieldset>
