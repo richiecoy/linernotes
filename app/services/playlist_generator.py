@@ -265,9 +265,10 @@ async def _update_playlist(db, playlist_name: str,
 
 async def _build_path_maps(db) -> tuple:
     """
-    Build bidirectional path mappings for all tracks.
-    Relative path = "Artist Name/Album Folder/filename.ext"
-    matches Navidrome's path format relative to music root.
+    Build mappings for matching our tracks to Navidrome songs.
+    Uses artist_name/filename as the match key (skipping album folder)
+    because album folder names can differ between our DB and Navidrome
+    (e.g. we store "Album (2005)" but filesystem has "Album").
     """
     cursor = await db.execute("""
         SELECT t.id as track_id, t.filename,
@@ -279,25 +280,27 @@ async def _build_path_maps(db) -> tuple:
     """)
     rows = await cursor.fetchall()
 
-    path_to_track = {}
-    track_to_path = {}
+    # Match key = "artist/filename" (skip album folder)
+    key_to_track = {}
+    track_to_key = {}
     for row in rows:
-        rel_path = f"{row['artist_name']}/{row['album_folder']}/{row['filename']}"
-        path_to_track[rel_path] = row['track_id']
-        track_to_path[row['track_id']] = rel_path
+        match_key = f"{row['artist_name']}/{row['filename']}"
+        key_to_track[match_key] = row['track_id']
+        track_to_key[row['track_id']] = match_key
 
-    return path_to_track, track_to_path
+    return key_to_track, track_to_key
 
 
 async def _build_nd_song_cache(base_url: str, username: str, password: str,
                                 artist_names: list) -> dict:
     """
-    Build a Navidrome path → song_id cache by searching for each artist.
-    Lets us map our tracks to Navidrome song IDs for playlist operations.
+    Build a Navidrome match_key → song_id cache by searching for each artist.
+    Match key = "artist_dir/filename" extracted from Navidrome's full path.
+    This avoids album folder mismatches (e.g. "(2005)" suffix differences).
     """
     from app.services.navidrome import search_songs
 
-    nd_path_to_id = {}
+    nd_key_to_id = {}
     searched = set()
 
     for artist in artist_names:
@@ -311,11 +314,16 @@ async def _build_nd_song_cache(base_url: str, username: str, password: str,
             path = song.get('path', '')
             song_id = song.get('id', '')
             if path and song_id:
-                nd_path_to_id[path] = song_id
+                # path = "Artist/Album/filename.mp3"
+                # match key = "Artist/filename.mp3" (skip album)
+                parts = path.split('/')
+                if len(parts) >= 2:
+                    match_key = f"{parts[0]}/{parts[-1]}"
+                    nd_key_to_id[match_key] = song_id
 
     logger.info("Built Navidrome song cache: %d songs from %d artists",
-                len(nd_path_to_id), len(searched))
-    return nd_path_to_id
+                len(nd_key_to_id), len(searched))
+    return nd_key_to_id
 
 
 async def _sync_to_navidrome(db, base_url: str, username: str,
@@ -359,8 +367,8 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
     """)
     artist_names = [row['name'] for row in await cursor.fetchall()]
 
-    # Build Navidrome path→song_id cache
-    nd_path_to_id = await _build_nd_song_cache(
+    # Build Navidrome match_key→song_id cache
+    nd_key_to_id = await _build_nd_song_cache(
         base_url, username, password, artist_names
     )
 
@@ -377,12 +385,12 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
             )
             our_track_ids = {row['track_id'] for row in await cursor.fetchall()}
 
-            # Build path map for this playlist
-            our_paths = {}
+            # Build match key map for this playlist
+            our_keys = {}
             for tid in our_track_ids:
-                path = track_to_path.get(tid)
-                if path:
-                    our_paths[path] = tid
+                key = track_to_path.get(tid)
+                if key:
+                    our_keys[key] = tid
 
             if playlist_name in nd_by_name:
                 # ── Existing playlist: detect removals + add new ──
@@ -399,8 +407,14 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
                 if isinstance(nd_entries, dict):
                     nd_entries = [nd_entries]
 
-                nd_paths = {e.get('path', ''): e.get('id', '')
-                            for e in nd_entries if e.get('path')}
+                # Build match keys from Navidrome entries
+                nd_keys = set()
+                for e in nd_entries:
+                    path = e.get('path', '')
+                    if path:
+                        parts = path.split('/')
+                        if len(parts) >= 2:
+                            nd_keys.add(f"{parts[0]}/{parts[-1]}")
 
                 # Detect removals: track was previously synced (in pre_existing)
                 # + exists in Navidrome library, but NOT in this Navidrome
@@ -410,10 +424,10 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
                 previously_synced = pre_existing_tracks.get(playlist_name, set()) \
                     if pre_existing_tracks else our_track_ids
 
-                for path, track_id in our_paths.items():
+                for key, track_id in our_keys.items():
                     if track_id not in previously_synced:
                         continue  # New this run, skip removal check
-                    if path not in nd_paths and path in nd_path_to_id:
+                    if key not in nd_keys and key in nd_key_to_id:
                         await db.execute(
                             """INSERT OR IGNORE INTO playlist_exclusions
                                (playlist_name, track_id, excluded_at)
@@ -428,14 +442,14 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
                         result['removals_detected'] += 1
                         logger.info(
                             "Detected removal: '%s' track_id=%d (%s)",
-                            playlist_name, track_id, path
+                            playlist_name, track_id, key
                         )
 
                 # Add new tracks not yet in Navidrome playlist
                 new_song_ids = []
-                for path, track_id in our_paths.items():
-                    if path not in nd_paths:
-                        nd_song_id = nd_path_to_id.get(path)
+                for key, track_id in our_keys.items():
+                    if key not in nd_keys:
+                        nd_song_id = nd_key_to_id.get(key)
                         if nd_song_id:
                             new_song_ids.append(nd_song_id)
 
@@ -453,8 +467,8 @@ async def _sync_to_navidrome(db, base_url: str, username: str,
             else:
                 # ── New playlist: create with all song IDs ──
                 song_ids = []
-                for path in our_paths:
-                    nd_song_id = nd_path_to_id.get(path)
+                for key in our_keys:
+                    nd_song_id = nd_key_to_id.get(key)
                     if nd_song_id:
                         song_ids.append(nd_song_id)
 
