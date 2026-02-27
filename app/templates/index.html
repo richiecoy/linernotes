@@ -4,12 +4,18 @@
 {% block content %}
 <div class="page-header">
     <h1>Artists</h1>
-    <div class="page-actions" x-data="scanState()" x-init="checkStatus()">
-        <button class="btn btn-primary" @click="startScan()" :disabled="running">
-            <span x-text="running ? `Scanning ${progress}/${total} — ${currentArtist}` : 'Scan Library'"></span>
+    <div class="page-actions" x-data="pageActions()" x-init="checkStatus()">
+        <button class="btn btn-primary" @click="startScan()" :disabled="scanRunning || mbRunning">
+            <span x-text="scanRunning ? `Scanning ${scanProgress}/${scanTotal} — ${scanArtist}` : 'Scan Library'"></span>
         </button>
-        <template x-if="lastResult && !running">
-            <span class="scan-result" x-text="`Last: ${lastResult.artists_found} artists, ${lastResult.albums_found} albums, ${lastResult.tracks_found} tracks`"></span>
+        <button class="btn btn-primary" @click="startMbSync()" :disabled="scanRunning || mbRunning">
+            <span x-text="mbRunning ? `Syncing ${mbProgress}/${mbTotal} — ${mbArtist}` : 'Sync MusicBrainz'"></span>
+        </button>
+        <template x-if="lastScanResult && !scanRunning">
+            <span class="scan-result" x-text="`Scan: ${lastScanResult.artists_found} artists, ${lastScanResult.tracks_found} tracks`"></span>
+        </template>
+        <template x-if="lastMbResult && !mbRunning">
+            <span class="scan-result" x-text="`MB: ${lastMbResult.synced} synced, ${lastMbResult.errors} errors`"></span>
         </template>
     </div>
 </div>
@@ -97,33 +103,50 @@
 
 {% block scripts %}
 <script>
-function scanState() {
+function pageActions() {
     return {
-        running: false,
-        progress: 0,
-        total: 0,
-        currentArtist: '',
-        lastResult: null,
+        scanRunning: false, scanProgress: 0, scanTotal: 0, scanArtist: '', lastScanResult: null,
+        mbRunning: false, mbProgress: 0, mbTotal: 0, mbArtist: '', lastMbResult: null,
         pollInterval: null,
 
         async startScan() {
             const resp = await fetch('/scan/run', { method: 'POST' });
             const data = await resp.json();
             if (data.status === 'started' || data.status === 'already_running') {
-                this.running = true;
+                this.scanRunning = true;
+                this.startPolling();
+            }
+        },
+
+        async startMbSync() {
+            const resp = await fetch('/mb/sync', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                this.mbRunning = true;
                 this.startPolling();
             }
         },
 
         async checkStatus() {
-            const resp = await fetch('/scan/status');
-            const data = await resp.json();
-            this.running = data.running;
-            this.progress = data.progress;
-            this.total = data.total;
-            this.currentArtist = data.current_artist;
-            this.lastResult = data.last_result;
-            if (this.running) {
+            // Check scan status
+            const scanResp = await fetch('/scan/status');
+            const scanData = await scanResp.json();
+            this.scanRunning = scanData.running;
+            this.scanProgress = scanData.progress;
+            this.scanTotal = scanData.total;
+            this.scanArtist = scanData.current_artist;
+            this.lastScanResult = scanData.last_result;
+
+            // Check MB sync status
+            const mbResp = await fetch('/mb/status');
+            const mbData = await mbResp.json();
+            this.mbRunning = mbData.running;
+            this.mbProgress = mbData.progress;
+            this.mbTotal = mbData.total;
+            this.mbArtist = mbData.current_artist;
+            this.lastMbResult = mbData.last_result;
+
+            if (this.scanRunning || this.mbRunning) {
                 this.startPolling();
             }
         },
@@ -132,7 +155,7 @@ function scanState() {
             if (this.pollInterval) return;
             this.pollInterval = setInterval(async () => {
                 await this.checkStatus();
-                if (!this.running) {
+                if (!this.scanRunning && !this.mbRunning) {
                     clearInterval(this.pollInterval);
                     this.pollInterval = null;
                     window.location.reload();

@@ -131,10 +131,21 @@ async def artist_detail(request: Request, artist_id: int):
             except json.JSONDecodeError:
                 pass
 
+        # Parse secondary types for each album (stored as JSON)
+        albums_processed = []
+        for album in albums:
+            album_dict = dict(album)
+            try:
+                st = album_dict.get('secondary_types', '[]')
+                album_dict['secondary_types_list'] = json.loads(st) if st else []
+            except (json.JSONDecodeError, TypeError):
+                album_dict['secondary_types_list'] = []
+            albums_processed.append(album_dict)
+
         return templates.TemplateResponse("artist.html", {
             "request": request,
             "artist": artist,
-            "albums": albums,
+            "albums": albums_processed,
             "album_stats": album_stats,
             "mb_genres": mb_genres,
             "genre_weights": genre_weights,

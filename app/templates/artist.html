@@ -107,6 +107,9 @@
                     <span class="album-year">{{ album.year }}</span>
                     {% endif %}
                     <span class="album-type">{{ album.primary_type or 'Album' }}</span>
+                    {% if album.mb_title and album.mb_title != album.folder_name %}
+                    <span class="mb-match">↔ {{ album.mb_title }}</span>
+                    {% endif %}
                 </div>
                 <div class="album-tags">
                     {% if album.is_live %}
@@ -115,6 +118,11 @@
                     {% if album.is_acoustic %}
                     <span class="tag tag-acoustic">Acoustic</span>
                     {% endif %}
+                    {% for st in album.secondary_types_list %}
+                    {% if st not in ['Live'] %}
+                    <span class="tag tag-secondary">{{ st }}</span>
+                    {% endif %}
+                    {% endfor %}
                 </div>
                 <div class="album-status">
                     {% if album_stats.get(album.id) %}
@@ -148,6 +156,11 @@
                     {% if album.is_live %}
                     <span class="tag tag-live">Live</span>
                     {% endif %}
+                    {% for st in album.secondary_types_list %}
+                    {% if st not in ['Live'] %}
+                    <span class="tag tag-secondary">{{ st }}</span>
+                    {% endif %}
+                    {% endfor %}
                 </div>
             </div>
             {% endfor %}
