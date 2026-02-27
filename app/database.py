@@ -123,9 +123,6 @@ DEFAULT_SETTINGS = {
     "playlist_schedule_time": "04:00",
     "enforcer_dry_run": "true",
     "mb_cache_days": "30",
-    "navidrome_url": "",
-    "navidrome_username": "",
-    "navidrome_password": "",
 }
 
 

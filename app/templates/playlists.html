@@ -23,12 +23,6 @@
         <span class="stat-value">{{ total_assignments }}</span>
         <span class="stat-label">Track Assignments</span>
     </div>
-    <div class="stat-card">
-        <span class="stat-value {% if not navidrome_configured %}warning{% endif %}">
-            {{ 'Yes' if navidrome_configured else 'No' }}
-        </span>
-        <span class="stat-label">Navidrome Linked</span>
-    </div>
 </div>
 
 {% if playlists %}

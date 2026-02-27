@@ -107,17 +107,11 @@ async def run_playlist_generator():
 
     music_path = await get_setting("library_path", "/music")
     playlist_path = await get_setting("playlist_path", "/playlists")
-    nd_url = await get_setting("navidrome_url", "")
-    nd_user = await get_setting("navidrome_username", "")
-    nd_pass = await get_setting("navidrome_password", "")
 
     db = await get_db()
     try:
         stats = await generate_playlists(
             db, music_path, playlist_path,
-            navidrome_url=nd_url if nd_url else None,
-            navidrome_user=nd_user if nd_user else None,
-            navidrome_pass=nd_pass if nd_pass else None,
         )
         logger.info("Scheduled playlist generation complete: %s", stats)
     except Exception as e:

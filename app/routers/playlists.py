@@ -62,11 +62,6 @@ async def playlists_page(request: Request):
         )
         total_playlists = (await cursor.fetchone())["count"]
 
-        # Check Navidrome config
-        nd_url = await get_setting("navidrome_url", "")
-        nd_user = await get_setting("navidrome_username", "")
-        navidrome_configured = bool(nd_url and nd_user)
-
         return templates.TemplateResponse("playlists.html", {
             "request": request,
             "playlists": playlists,
@@ -74,7 +69,6 @@ async def playlists_page(request: Request):
             "logs": logs,
             "total_playlists": total_playlists,
             "total_assignments": total_assignments,
-            "navidrome_configured": navidrome_configured,
             "gen_state": _gen_state,
         })
     finally:
@@ -200,17 +194,11 @@ async def _run_generator():
     try:
         music_path = await get_setting("library_path", "/music")
         playlist_path = await get_setting("playlist_path", "/playlists")
-        nd_url = await get_setting("navidrome_url", "")
-        nd_user = await get_setting("navidrome_username", "")
-        nd_pass = await get_setting("navidrome_password", "")
 
         db = await get_db()
         try:
             stats = await generate_playlists(
                 db, music_path, playlist_path,
-                navidrome_url=nd_url if nd_url else None,
-                navidrome_user=nd_user if nd_user else None,
-                navidrome_pass=nd_pass if nd_pass else None,
                 progress_callback=progress_cb,
             )
             _gen_state["last_result"] = stats

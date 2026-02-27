@@ -37,9 +37,6 @@ SPECIAL_PLAYLISTS = {
 
 
 async def generate_playlists(db, music_path: str, playlist_path: str,
-                              navidrome_url: str = None,
-                              navidrome_user: str = None,
-                              navidrome_pass: str = None,
                               progress_callback=None) -> dict:
     stats = {
         'genre_playlists': 0,

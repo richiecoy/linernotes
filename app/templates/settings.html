@@ -71,29 +71,6 @@
         </div>
     </fieldset>
 
-    <!-- Navidrome -->
-    <fieldset>
-        <legend>Navidrome Integration</legend>
-        <div class="form-group">
-            <label for="navidrome_url">Navidrome URL</label>
-            <input type="text" id="navidrome_url" name="navidrome_url"
-                   value="{{ settings.navidrome_url }}" placeholder="http://10.0.20.99:30043">
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="navidrome_username">Username</label>
-                <input type="text" id="navidrome_username" name="navidrome_username"
-                       value="{{ settings.navidrome_username }}">
-            </div>
-            <div class="form-group">
-                <label for="navidrome_password">Password</label>
-                <input type="password" id="navidrome_password" name="navidrome_password"
-                       value="{{ settings.navidrome_password }}">
-            </div>
-        </div>
-        <span class="help-text">Required for playlist sync. Uses the Subsonic API.</span>
-    </fieldset>
-
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
