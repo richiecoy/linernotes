@@ -2,15 +2,30 @@
 LinerNotes Artist Routes
 """
 import json
+import os
 import logging
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
-from app.database import get_db
+from app.database import get_db, get_setting
 
 logger = logging.getLogger("linernotes.artists")
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+
+@router.get("/artist-image/{artist_name}")
+async def artist_image(artist_name: str):
+    """Serve artist folder.jpg from the music library."""
+    library_path = await get_setting("library_path", "/music")
+    artist_path = os.path.join(library_path, artist_name)
+
+    for img_name in ('folder.jpg', 'folder.png', 'artist.jpg', 'artist.png'):
+        img_path = os.path.join(artist_path, img_name)
+        if os.path.isfile(img_path):
+            return FileResponse(img_path)
+
+    return HTMLResponse(status_code=404)
 
 
 @router.get("/", response_class=HTMLResponse)

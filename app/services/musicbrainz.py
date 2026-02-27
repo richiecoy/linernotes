@@ -240,7 +240,7 @@ async def sync_artist_from_mb(db, artist_id: int, artist_name: str,
                     secondary_types, in_library, is_live, is_acoustic, year,
                     created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'), datetime('now'))""",
-                (artist_id, '', rg_title, rg_id, primary_type,
+                (artist_id, rg_title, rg_title, rg_id, primary_type,
                  json.dumps(secondary_types), int(is_live), int(is_acoustic), year)
             )
         else:

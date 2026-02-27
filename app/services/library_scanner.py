@@ -7,6 +7,7 @@ import os
 import re
 import json
 import logging
+import urllib.parse
 from datetime import datetime, timezone
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3
@@ -19,11 +20,12 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.ogg', '.wma', '.opus', '.aac', '.
 
 
 def get_sort_name(name: str) -> str:
-    """Generate a sort name (strip leading 'The ', 'A ', 'An ')."""
-    for prefix in ('The ', 'A ', 'An '):
-        if name.startswith(prefix):
-            return name[len(prefix):].strip()
-    return name
+    """Generate a sort name (strip leading 'The ', 'A ', 'An ', case-insensitive)."""
+    lower = name.lower()
+    for prefix in ('the ', 'a ', 'an '):
+        if lower.startswith(prefix):
+            return name[len(prefix):].strip().lower()
+    return name.lower()
 
 
 def read_audio_metadata(filepath: str) -> dict:
@@ -156,14 +158,29 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
             progress_callback(artist_idx + 1, total_artists, artist_name)
 
         # Upsert artist
+        # Check for artist thumbnail
+        thumb_url = None
+        for img_name in ('folder.jpg', 'folder.png', 'artist.jpg', 'artist.png'):
+            img_path = os.path.join(artist_path, img_name)
+            if os.path.isfile(img_path):
+                thumb_url = f"/artist-image/{urllib.parse.quote(artist_name)}"
+                break
+
         if artist_name in existing_artists:
             artist_id = existing_artists[artist_name]
+            # Update sort name and thumb in case they changed
+            sort_name = get_sort_name(artist_name)
+            await db.execute(
+                """UPDATE artists SET sort_name = ?, thumb_url = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (sort_name, thumb_url, artist_id)
+            )
         else:
             sort_name = get_sort_name(artist_name)
             await db.execute(
-                """INSERT INTO artists (name, sort_name, created_at, updated_at)
-                   VALUES (?, ?, datetime('now'), datetime('now'))""",
-                (artist_name, sort_name)
+                """INSERT INTO artists (name, sort_name, thumb_url, created_at, updated_at)
+                   VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
+                (artist_name, sort_name, thumb_url)
             )
             cursor = await db.execute("SELECT last_insert_rowid()")
             artist_id = (await cursor.fetchone())[0]
