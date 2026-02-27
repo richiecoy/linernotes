@@ -42,8 +42,8 @@ async def artist_index(request: Request, q: str = "", genre: str = ""):
             params.append(f"%{q}%")
 
         if genre:
-            query += " AND (resolved_genre = ? OR manual_override = ?)"
-            params.extend([genre, genre])
+            query += " AND COALESCE(manual_override, resolved_genre, 'Unresolved') = ?"
+            params.append(genre)
 
         query += " ORDER BY sort_name ASC, name ASC"
 

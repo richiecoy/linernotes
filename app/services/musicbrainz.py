@@ -206,55 +206,59 @@ async def sync_artist_from_mb(db, artist_id: int, artist_name: str,
     existing_mb_albums = {row['mb_rgid']: row['id'] for row in await cursor.fetchall()}
 
     for rg in release_groups:
-        rg_title = rg.get('title', '')
-        rg_id = rg.get('id', '')
-        primary_type = rg.get('primary-type', '')
-        secondary_types = rg.get('secondary-types', [])
-        year = extract_year_from_first_release(rg)
-        is_live = 'Live' in secondary_types
-        is_acoustic = _detect_acoustic(rg_title)
+        try:
+            rg_title = rg.get('title', '')
+            rg_id = rg.get('id', '')
+            primary_type = rg.get('primary-type', '')
+            secondary_types = rg.get('secondary-types', [])
+            year = extract_year_from_first_release(rg)
+            is_live = 'Live' in secondary_types
+            is_acoustic = _detect_acoustic(rg_title)
 
-        # Try to match to a library album
-        matched_library_id = _match_to_library(rg_title, library_albums)
+            # Try to match to a library album
+            matched_library_id = _match_to_library(rg_title, library_albums)
 
-        if matched_library_id:
-            # Update existing library album with MB data
-            result['matched_albums'] += 1
-            await db.execute(
-                """UPDATE albums SET
-                   mb_title = ?, mb_rgid = ?, primary_type = ?,
-                   secondary_types = ?, is_live = ?, is_acoustic = ?,
-                   year = ?, match_score = 100,
-                   updated_at = datetime('now')
-                   WHERE id = ?""",
-                (rg_title, rg_id, primary_type,
-                 json.dumps(secondary_types), int(is_live), int(is_acoustic),
-                 year, matched_library_id)
-            )
-        elif rg_id not in existing_mb_albums:
-            # Insert as MB-only album (not in library)
-            result['new_mb_albums'] += 1
-            await db.execute(
-                """INSERT INTO albums
-                   (artist_id, folder_name, mb_title, mb_rgid, primary_type,
-                    secondary_types, in_library, is_live, is_acoustic, year,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'), datetime('now'))""",
-                (artist_id, rg_title, rg_title, rg_id, primary_type,
-                 json.dumps(secondary_types), int(is_live), int(is_acoustic), year)
-            )
-        else:
-            # Update existing MB-only album
-            await db.execute(
-                """UPDATE albums SET
-                   mb_title = ?, primary_type = ?, secondary_types = ?,
-                   is_live = ?, is_acoustic = ?, year = ?,
-                   updated_at = datetime('now')
-                   WHERE id = ?""",
-                (rg_title, primary_type, json.dumps(secondary_types),
-                 int(is_live), int(is_acoustic), year,
-                 existing_mb_albums[rg_id])
-            )
+            if matched_library_id:
+                # Update existing library album with MB data
+                result['matched_albums'] += 1
+                await db.execute(
+                    """UPDATE albums SET
+                       mb_title = ?, mb_rgid = ?, primary_type = ?,
+                       secondary_types = ?, is_live = ?, is_acoustic = ?,
+                       year = ?, match_score = 100,
+                       updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (rg_title, rg_id, primary_type,
+                     json.dumps(secondary_types), int(is_live), int(is_acoustic),
+                     year, matched_library_id)
+                )
+            elif rg_id not in existing_mb_albums:
+                # Insert as MB-only album (not in library)
+                # Use mb_rgid in folder_name to guarantee uniqueness
+                result['new_mb_albums'] += 1
+                await db.execute(
+                    """INSERT OR IGNORE INTO albums
+                       (artist_id, folder_name, mb_title, mb_rgid, primary_type,
+                        secondary_types, in_library, is_live, is_acoustic, year,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'), datetime('now'))""",
+                    (artist_id, f"_mb_{rg_id}", rg_title, rg_id, primary_type,
+                     json.dumps(secondary_types), int(is_live), int(is_acoustic), year)
+                )
+            else:
+                # Update existing MB-only album
+                await db.execute(
+                    """UPDATE albums SET
+                       mb_title = ?, primary_type = ?, secondary_types = ?,
+                       is_live = ?, is_acoustic = ?, year = ?,
+                       updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (rg_title, primary_type, json.dumps(secondary_types),
+                     int(is_live), int(is_acoustic), year,
+                     existing_mb_albums[rg_id])
+                )
+        except Exception as e:
+            logger.warning("Failed to process RG '%s' for artist %s: %s", rg_title, artist_name, e)
 
     await db.commit()
     return result
