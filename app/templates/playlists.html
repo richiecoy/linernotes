@@ -4,64 +4,187 @@
 {% block content %}
 <div class="page-header">
     <h1>Playlists</h1>
-    <div class="page-actions" x-data="{ running: false }">
-        <button class="btn btn-primary" @click="running = true; fetch('/playlists/generate', {method:'POST'})"
-                :disabled="running">
-            <span x-text="running ? 'Generating...' : 'Generate Now'"></span>
+    <div class="page-actions" x-data="genActions()" x-init="checkStatus()">
+        <button class="btn btn-primary" @click="runGenerate()" :disabled="running">
+            <span x-text="running ? `Generating ${progress}/${total} — ${currentPlaylist}` : 'Generate Playlists'"></span>
         </button>
+        <template x-if="lastResult && !running">
+            <span class="scan-result" x-text="resultSummary"></span>
+        </template>
+    </div>
+</div>
+
+<div class="stats-cards">
+    <div class="stat-card">
+        <span class="stat-value">{{ total_playlists }}</span>
+        <span class="stat-label">API Playlists</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value">{{ total_assignments }}</span>
+        <span class="stat-label">Track Assignments</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value">{{ nsp_count }}</span>
+        <span class="stat-label">Decade (.nsp)</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value {% if not navidrome_configured %}warning{% endif %}">
+            {{ 'Yes' if navidrome_configured else 'No' }}
+        </span>
+        <span class="stat-label">Navidrome Linked</span>
     </div>
 </div>
 
 {% if playlists %}
-<section>
-    <h2>Active Playlists</h2>
-    <div class="playlist-grid">
-        {% for pl in playlists %}
-        <div class="playlist-card">
-            <h3>{{ pl.playlist_name }}</h3>
-            <span class="track-count">{{ pl.track_count }} tracks</span>
-            {% if exclusions.get(pl.playlist_name) %}
-            <span class="exclusion-count">{{ exclusions[pl.playlist_name] }} excluded</span>
-            {% endif %}
+<div class="playlist-sections">
+    <!-- Genre Playlists -->
+    {% set genre_playlists = [] %}
+    {% set special_playlists = [] %}
+    {% for p in playlists %}
+        {% if p.playlist_name in ['Live', 'Acoustic'] %}
+            {% set _ = special_playlists.append(p) %}
+        {% else %}
+            {% set _ = genre_playlists.append(p) %}
+        {% endif %}
+    {% endfor %}
+
+    <section>
+        <h2>Genre Playlists</h2>
+        <div class="playlist-grid">
+            {% for p in genre_playlists %}
+            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
+                <span class="playlist-name">{{ p.playlist_name }}</span>
+                <span class="playlist-count">{{ p.track_count }} tracks</span>
+                {% if exclusions.get(p.playlist_name) %}
+                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
+                {% endif %}
+            </a>
+            {% endfor %}
         </div>
-        {% endfor %}
-    </div>
-</section>
+    </section>
+
+    {% if special_playlists %}
+    <section>
+        <h2>Special Playlists</h2>
+        <div class="playlist-grid">
+            {% for p in special_playlists %}
+            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
+                <span class="playlist-name">{{ p.playlist_name }}</span>
+                <span class="playlist-count">{{ p.track_count }} tracks</span>
+                {% if exclusions.get(p.playlist_name) %}
+                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Decade Smart Playlists (info only — managed by Navidrome) -->
+    {% if nsp_count > 0 %}
+    <section>
+        <h2>Decade Playlists <span class="badge">.nsp — managed by Navidrome</span></h2>
+        <p class="help-text">
+            These are smart playlists that Navidrome auto-imports and auto-refreshes.
+            They update automatically when you add music. Managed in Navidrome, not here.
+        </p>
+        <div class="playlist-grid">
+            {% for decade in ['1960s','1970s','1980s','1990s','2000s','2010s','2020s'] %}
+            <div class="playlist-card nsp-card">
+                <span class="playlist-name">{{ decade }}</span>
+                <span class="playlist-count">.nsp smart playlist</span>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+</div>
 {% else %}
 <div class="empty-state">
-    <p>No playlists generated yet. Configure your settings and run the generator.</p>
+    <p>No playlists yet. Click "Generate Playlists" to create genre, special, and decade playlists.</p>
 </div>
 {% endif %}
 
+{% if logs %}
 <section class="log-section">
     <h2>Recent Activity</h2>
-    {% if logs %}
     <table class="data-table">
         <thead>
             <tr>
-                <th>Time</th>
                 <th>Playlist</th>
                 <th>Action</th>
                 <th>Tracks</th>
                 <th>Status</th>
+                <th>Time</th>
             </tr>
         </thead>
         <tbody>
             {% for log in logs %}
             <tr>
-                <td class="nowrap">{{ log.created_at }}</td>
-                <td>{{ log.playlist_name or '—' }}</td>
+                <td>{{ log.playlist_name }}</td>
                 <td>{{ log.action }}</td>
-                <td>{{ log.track_count or '—' }}</td>
+                <td>{{ log.track_count }}</td>
                 <td><span class="status-badge status-{{ log.status }}">{{ log.status }}</span></td>
+                <td class="nowrap">{{ log.created_at }}</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    {% else %}
-    <div class="empty-state">
-        <p>No playlist activity yet.</p>
-    </div>
-    {% endif %}
 </section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function genActions() {
+    return {
+        running: false, progress: 0, total: 0, currentPlaylist: '', lastResult: null,
+        pollInterval: null,
+
+        get resultSummary() {
+            if (!this.lastResult) return '';
+            const r = this.lastResult;
+            if (r.error) return `Error: ${r.error}`;
+            const parts = [];
+            if (r.genre_playlists) parts.push(`${r.genre_playlists} genre`);
+            if (r.special_playlists) parts.push(`${r.special_playlists} special`);
+            if (r.decade_playlists) parts.push(`${r.decade_playlists} decade .nsp`);
+            parts.push(`${r.tracks_added} new tracks`);
+            return parts.join(', ');
+        },
+
+        async runGenerate() {
+            const resp = await fetch('/playlists/generate', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                this.running = true;
+                this.startPolling();
+            }
+        },
+
+        async checkStatus() {
+            const resp = await fetch('/playlists/status');
+            const data = await resp.json();
+            this.running = data.running;
+            this.progress = data.progress;
+            this.total = data.total;
+            this.currentPlaylist = data.current_playlist;
+            this.lastResult = data.last_result;
+            if (this.running) this.startPolling();
+        },
+
+        startPolling() {
+            if (this.pollInterval) return;
+            this.pollInterval = setInterval(async () => {
+                await this.checkStatus();
+                if (!this.running) {
+                    clearInterval(this.pollInterval);
+                    this.pollInterval = null;
+                    window.location.reload();
+                }
+            }, 2000);
+        }
+    };
+}
+</script>
 {% endblock %}

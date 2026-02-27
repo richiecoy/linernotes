@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ playlist_name }} — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/playlists" class="back-link">← Playlists</a>
+    <h1>{{ playlist_name }}</h1>
+</div>
+
+<div class="stats-cards">
+    <div class="stat-card">
+        <span class="stat-value">{{ tracks|length }}</span>
+        <span class="stat-label">Tracks</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value">{{ exclusions|length }}</span>
+        <span class="stat-label">Excluded</span>
+    </div>
+</div>
+
+<section>
+    <h2>Tracks</h2>
+    {% if tracks %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Artist</th>
+                <th>Title</th>
+                <th>Album</th>
+                <th>Year</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for track in tracks %}
+            <tr>
+                <td>{{ track.artist_name }}</td>
+                <td>{{ track.title or track.filename }}</td>
+                <td>{{ track.album_folder }}</td>
+                <td>{{ track.year or '—' }}</td>
+                <td>
+                    <button class="btn btn-small"
+                            onclick="excludeTrack('{{ playlist_name|urlencode }}', {{ track.track_id }})"
+                            title="Exclude from playlist">✕</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No tracks in this playlist.</p></div>
+    {% endif %}
+</section>
+
+{% if exclusions %}
+<section>
+    <h2>Excluded Tracks</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Artist</th>
+                <th>Title</th>
+                <th>Album</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ex in exclusions %}
+            <tr class="excluded-row">
+                <td>{{ ex.artist_name }}</td>
+                <td>{{ ex.title or ex.filename }}</td>
+                <td>{{ ex.album_folder }}</td>
+                <td>
+                    <button class="btn btn-small"
+                            onclick="includeTrack('{{ playlist_name|urlencode }}', {{ ex.track_id }})"
+                            title="Remove exclusion">↩</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function excludeTrack(playlist, trackId) {
+    await fetch(`/playlists/${playlist}/exclude/${trackId}`, { method: 'POST' });
+    window.location.reload();
+}
+async function includeTrack(playlist, trackId) {
+    await fetch(`/playlists/${playlist}/include/${trackId}`, { method: 'POST' });
+    window.location.reload();
+}
+</script>
+{% endblock %}
