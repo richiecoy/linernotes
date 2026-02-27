@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Artists — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Artists</h1>
+    <div class="stats-bar">
+        <span class="stat"><strong>{{ total_artists }}</strong> artists</span>
+        <span class="stat"><strong>{{ total_albums }}</strong> albums</span>
+        <span class="stat"><strong>{{ total_tracks }}</strong> tracks</span>
+    </div>
+</div>
+
+<div class="page-layout">
+    <!-- Genre filter sidebar -->
+    <aside class="filter-sidebar">
+        <h3>Genres</h3>
+        <ul class="genre-filter-list">
+            <li>
+                <a href="/" class="{% if not selected_genre %}active{% endif %}">
+                    All <span class="badge">{{ total_artists }}</span>
+                </a>
+            </li>
+            {% for gc in genre_counts %}
+            <li>
+                <a href="/?genre={{ gc.genre }}"
+                   class="{% if selected_genre == gc.genre %}active{% endif %}">
+                    {{ gc.genre }} <span class="badge">{{ gc.count }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </aside>
+
+    <!-- Artist list -->
+    <section class="main-panel">
+        <!-- Search -->
+        <form class="search-bar" method="get" action="/">
+            <input type="text" name="q" placeholder="Search artists..."
+                   value="{{ search_query }}" autocomplete="off">
+            {% if selected_genre %}
+            <input type="hidden" name="genre" value="{{ selected_genre }}">
+            {% endif %}
+            <button type="submit">Search</button>
+            {% if search_query or selected_genre %}
+            <a href="/" class="btn btn-secondary">Clear</a>
+            {% endif %}
+        </form>
+
+        {% if artists %}
+        <div class="artist-grid">
+            {% for artist in artists %}
+            <a href="/artist/{{ artist.id }}" class="artist-card">
+                <div class="artist-thumb">
+                    {% if artist.thumb_url %}
+                    <img src="{{ artist.thumb_url }}" alt="{{ artist.name }}">
+                    {% else %}
+                    <div class="thumb-placeholder">{{ artist.name[0] }}</div>
+                    {% endif %}
+                </div>
+                <div class="artist-info">
+                    <h3>{{ artist.name }}</h3>
+                    <span class="genre-badge {% if artist.manual_override %}override{% endif %}">
+                        {{ artist.manual_override or artist.resolved_genre or 'Unresolved' }}
+                    </span>
+                    {% if album_counts.get(artist.id) %}
+                    <span class="album-count">{{ album_counts[artist.id] }} album{{ 's' if album_counts[artist.id] != 1 }}</span>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            {% if search_query or selected_genre %}
+            <p>No artists found matching your filters.</p>
+            {% else %}
+            <p>No artists in the library yet.</p>
+            <p>Configure your library path in <a href="/settings">Settings</a> and run a scan.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

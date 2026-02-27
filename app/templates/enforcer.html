@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Enforcer — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Metadata Enforcer</h1>
+    <div class="page-actions" x-data="{ running: false }">
+        <button class="btn btn-primary" @click="running = true; fetch('/enforcer/run', {method:'POST'})"
+                :disabled="running">
+            <span x-text="running ? 'Running...' : 'Run Now'"></span>
+        </button>
+    </div>
+</div>
+
+<div class="stats-cards">
+    <div class="stat-card">
+        <span class="stat-value">{{ tracks_checked }}</span>
+        <span class="stat-label">Tracks Checked</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value {% if pending_updates > 0 %}warning{% endif %}">{{ pending_updates }}</span>
+        <span class="stat-label">Pending Updates</span>
+    </div>
+    <div class="stat-card">
+        <span class="stat-value">{{ 'ON' if dry_run else 'OFF' }}</span>
+        <span class="stat-label">Dry Run</span>
+    </div>
+</div>
+
+<section class="log-section">
+    <h2>Recent Activity</h2>
+    {% if logs %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Artist</th>
+                <th>Album</th>
+                <th>Track</th>
+                <th>Old</th>
+                <th>New</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td class="nowrap">{{ log.created_at }}</td>
+                <td>{{ log.artist_name }}</td>
+                <td>{{ log.album_name }}</td>
+                <td>{{ log.track_filename }}</td>
+                <td><code>{{ log.old_value or '—' }}</code></td>
+                <td><code>{{ log.new_value or '—' }}</code></td>
+                <td><span class="status-badge status-{{ log.status }}">{{ log.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No enforcer activity yet. Run the enforcer to check metadata.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

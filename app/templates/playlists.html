@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Playlists — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Playlists</h1>
+    <div class="page-actions" x-data="{ running: false }">
+        <button class="btn btn-primary" @click="running = true; fetch('/playlists/generate', {method:'POST'})"
+                :disabled="running">
+            <span x-text="running ? 'Generating...' : 'Generate Now'"></span>
+        </button>
+    </div>
+</div>
+
+{% if playlists %}
+<section>
+    <h2>Active Playlists</h2>
+    <div class="playlist-grid">
+        {% for pl in playlists %}
+        <div class="playlist-card">
+            <h3>{{ pl.playlist_name }}</h3>
+            <span class="track-count">{{ pl.track_count }} tracks</span>
+            {% if exclusions.get(pl.playlist_name) %}
+            <span class="exclusion-count">{{ exclusions[pl.playlist_name] }} excluded</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% else %}
+<div class="empty-state">
+    <p>No playlists generated yet. Configure your settings and run the generator.</p>
+</div>
+{% endif %}
+
+<section class="log-section">
+    <h2>Recent Activity</h2>
+    {% if logs %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Playlist</th>
+                <th>Action</th>
+                <th>Tracks</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td class="nowrap">{{ log.created_at }}</td>
+                <td>{{ log.playlist_name or '—' }}</td>
+                <td>{{ log.action }}</td>
+                <td>{{ log.track_count or '—' }}</td>
+                <td><span class="status-badge status-{{ log.status }}">{{ log.status }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No playlist activity yet.</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

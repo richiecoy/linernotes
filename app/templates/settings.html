@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Settings — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+{% if saved %}
+<div class="alert alert-success">Settings saved successfully.</div>
+{% endif %}
+
+<form method="post" action="/settings" class="settings-form">
+    <!-- Library -->
+    <fieldset>
+        <legend>Music Library</legend>
+        <div class="form-group">
+            <label for="library_path">Library Path</label>
+            <input type="text" id="library_path" name="library_path"
+                   value="{{ settings.library_path }}" placeholder="/music">
+            <span class="help-text">Path to your music library inside the container</span>
+        </div>
+    </fieldset>
+
+    <!-- Schedules -->
+    <fieldset>
+        <legend>Schedules</legend>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="scan_schedule_hours">Library Scan Interval (hours)</label>
+                <input type="number" id="scan_schedule_hours" name="scan_schedule_hours"
+                       value="{{ settings.scan_schedule_hours }}" min="1" max="168">
+            </div>
+            <div class="form-group">
+                <label for="enforcer_schedule_hours">Enforcer Interval (hours)</label>
+                <input type="number" id="enforcer_schedule_hours" name="enforcer_schedule_hours"
+                       value="{{ settings.enforcer_schedule_hours }}" min="1" max="168">
+            </div>
+            <div class="form-group">
+                <label for="playlist_schedule_hours">Playlist Interval (hours)</label>
+                <input type="number" id="playlist_schedule_hours" name="playlist_schedule_hours"
+                       value="{{ settings.playlist_schedule_hours }}" min="1" max="168">
+            </div>
+        </div>
+    </fieldset>
+
+    <!-- Metadata Enforcer -->
+    <fieldset>
+        <legend>Metadata Enforcer</legend>
+        <div class="form-group">
+            <label class="checkbox-label">
+                <input type="hidden" name="enforcer_dry_run" value="false">
+                <input type="checkbox" name="enforcer_dry_run" value="true"
+                       {% if settings.enforcer_dry_run == 'true' %}checked{% endif %}>
+                Dry Run Mode
+            </label>
+            <span class="help-text">When enabled, the enforcer will log what it would change without modifying any files</span>
+        </div>
+        <div class="form-group">
+            <label for="mb_cache_days">MusicBrainz Cache Duration (days)</label>
+            <input type="number" id="mb_cache_days" name="mb_cache_days"
+                   value="{{ settings.mb_cache_days }}" min="1" max="365">
+            <span class="help-text">How long to cache MB data before refreshing</span>
+        </div>
+    </fieldset>
+
+    <!-- Navidrome -->
+    <fieldset>
+        <legend>Navidrome Integration</legend>
+        <div class="form-group">
+            <label for="navidrome_url">Navidrome URL</label>
+            <input type="text" id="navidrome_url" name="navidrome_url"
+                   value="{{ settings.navidrome_url }}" placeholder="http://10.0.20.99:30043">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="navidrome_username">Username</label>
+                <input type="text" id="navidrome_username" name="navidrome_username"
+                       value="{{ settings.navidrome_username }}">
+            </div>
+            <div class="form-group">
+                <label for="navidrome_password">Password</label>
+                <input type="password" id="navidrome_password" name="navidrome_password"
+                       value="{{ settings.navidrome_password }}">
+            </div>
+        </div>
+        <span class="help-text">Required for playlist sync. Uses the Subsonic API.</span>
+    </fieldset>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+</form>
+
+<!-- Scheduled Jobs Status -->
+<section class="jobs-status">
+    <h2>Scheduled Jobs</h2>
+    {% if jobs %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Job</th>
+                <th>Next Run</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td>{{ job.name }}</td>
+                <td>{{ job.next_run }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No jobs scheduled.</p>
+    {% endif %}
+</section>
+{% endblock %}

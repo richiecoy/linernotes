@@ -1,0 +1,19 @@
+services:
+  linernotes:
+    image: ghcr.io/richicoy/linernotes:latest
+    container_name: linernotes
+    restart: unless-stopped
+    ports:
+      - "8299:8299"
+    volumes:
+      - linernotes_data:/data
+      - /mnt/MediaData/Music2:/music:ro
+      - /mnt/MediaData/Playlists:/playlists
+    environment:
+      - LINERNOTES_DATA=/data
+      - MUSIC_LIBRARY_PATH=/music
+      - PLAYLIST_PATH=/playlists
+      - TZ=America/New_York
+
+volumes:
+  linernotes_data:

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ artist.name }} — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <a href="/" class="back-link">← Artists</a>
+    <h1>{{ artist.name }}</h1>
+</div>
+
+<div class="artist-detail-layout">
+    <!-- Artist info panel -->
+    <section class="artist-meta-panel">
+        <div class="artist-portrait">
+            {% if artist.thumb_url %}
+            <img src="{{ artist.thumb_url }}" alt="{{ artist.name }}">
+            {% else %}
+            <div class="thumb-placeholder large">{{ artist.name[0] }}</div>
+            {% endif %}
+        </div>
+
+        <!-- Genre assignment -->
+        <div class="genre-section" x-data="{ editing: false }">
+            <h3>Genre</h3>
+            <div class="current-genre">
+                {% if artist.manual_override %}
+                <span class="genre-badge override">{{ artist.manual_override }}</span>
+                <span class="override-label">Manual override</span>
+                {% elif artist.resolved_genre %}
+                <span class="genre-badge">{{ artist.resolved_genre }}</span>
+                <span class="override-label">Auto-resolved</span>
+                {% else %}
+                <span class="genre-badge unresolved">Unresolved</span>
+                {% endif %}
+            </div>
+
+            <button class="btn btn-small" @click="editing = !editing">
+                <span x-text="editing ? 'Cancel' : 'Override'"></span>
+            </button>
+
+            <form x-show="editing" method="post" action="/artist/{{ artist.id }}/override"
+                  class="override-form" x-cloak>
+                <select name="genre">
+                    <option value="">— Clear override —</option>
+                    {% for g in ['Alternative', 'Rock', 'Metal', 'Punk', 'Pop', 'Hip Hop', 'R&B',
+                                 'Electronic', 'Country', 'Folk', 'Jazz', 'Classical', 'Reggae', 'Soundtrack'] %}
+                    <option value="{{ g }}"
+                        {% if artist.manual_override == g %}selected{% endif %}>{{ g }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </form>
+        </div>
+
+        <!-- MB Genres breakdown -->
+        {% if mb_genres %}
+        <div class="mb-genres-section">
+            <h3>MusicBrainz Genres</h3>
+            <div class="mb-genre-tags">
+                {% for g in mb_genres %}
+                <span class="mb-genre-tag">{{ g }}</span>
+                {% endfor %}
+            </div>
+            {% if genre_weights %}
+            <div class="genre-weights">
+                <h4>Resolved Weights</h4>
+                {% for cat, weight in genre_weights|dictsort(by='value', reverse=true) %}
+                <div class="weight-bar">
+                    <span class="weight-label">{{ cat }}</span>
+                    <div class="weight-fill" style="width: {{ (weight / genre_weights.values()|max * 100)|int }}%">
+                        {{ weight }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if artist.mbid %}
+        <div class="external-links">
+            <a href="https://musicbrainz.org/artist/{{ artist.mbid }}" target="_blank" rel="noopener">
+                View on MusicBrainz ↗
+            </a>
+        </div>
+        {% endif %}
+
+        {% if artist.last_synced %}
+        <p class="last-synced">Last synced: {{ artist.last_synced }}</p>
+        {% endif %}
+    </section>
+
+    <!-- Discography -->
+    <section class="discography-panel">
+        <h2>Discography</h2>
+
+        {% set in_library = albums|selectattr('in_library')|list %}
+        {% set not_in_library = albums|rejectattr('in_library')|list %}
+
+        {% if in_library %}
+        <h3 class="disco-section-header">In Your Library ({{ in_library|length }})</h3>
+        <div class="album-list">
+            {% for album in in_library %}
+            <div class="album-row">
+                <div class="album-info">
+                    <span class="album-title">{{ album.folder_name }}</span>
+                    {% if album.year %}
+                    <span class="album-year">{{ album.year }}</span>
+                    {% endif %}
+                    <span class="album-type">{{ album.primary_type or 'Album' }}</span>
+                </div>
+                <div class="album-tags">
+                    {% if album.is_live %}
+                    <span class="tag tag-live">Live</span>
+                    {% endif %}
+                    {% if album.is_acoustic %}
+                    <span class="tag tag-acoustic">Acoustic</span>
+                    {% endif %}
+                </div>
+                <div class="album-status">
+                    {% if album_stats.get(album.id) %}
+                    {% set stats = album_stats[album.id] %}
+                    <span class="track-count">{{ stats.track_count }} tracks</span>
+                    {% if stats.pending_updates > 0 %}
+                    <span class="pending-badge">{{ stats.pending_updates }} pending</span>
+                    {% else %}
+                    <span class="ok-badge">✓</span>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if not_in_library %}
+        <h3 class="disco-section-header">Not In Library ({{ not_in_library|length }})</h3>
+        <div class="album-list dimmed">
+            {% for album in not_in_library %}
+            <div class="album-row">
+                <div class="album-info">
+                    <span class="album-title">{{ album.mb_title }}</span>
+                    {% if album.year %}
+                    <span class="album-year">{{ album.year }}</span>
+                    {% endif %}
+                    <span class="album-type">{{ album.primary_type or 'Album' }}</span>
+                </div>
+                <div class="album-tags">
+                    {% if album.is_live %}
+                    <span class="tag tag-live">Live</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if not albums %}
+        <div class="empty-state">
+            <p>No albums found. Run a library scan to populate.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

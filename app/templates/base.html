@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LinerNotes{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <span class="brand-icon">🎵</span>
+            <span class="brand-text">LinerNotes</span>
+        </div>
+        <ul class="nav-links">
+            <li><a href="/" class="{% if request.url.path == '/' %}active{% endif %}">
+                <span class="nav-icon">📀</span> Artists
+            </a></li>
+            <li><a href="/enforcer" class="{% if request.url.path == '/enforcer' %}active{% endif %}">
+                <span class="nav-icon">🔍</span> Enforcer
+            </a></li>
+            <li><a href="/playlists" class="{% if request.url.path == '/playlists' %}active{% endif %}">
+                <span class="nav-icon">📋</span> Playlists
+            </a></li>
+            <li><a href="/settings" class="{% if '/settings' in request.url.path %}active{% endif %}">
+                <span class="nav-icon">⚙️</span> Settings
+            </a></li>
+        </ul>
+        <div class="sidebar-footer">
+            <span class="version">v{{ config.APP_VERSION }}</span>
+        </div>
+    </nav>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

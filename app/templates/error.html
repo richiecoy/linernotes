@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error — LinerNotes{% endblock %}
+
+{% block content %}
+<div class="empty-state">
+    <h1>{{ message or 'Something went wrong' }}</h1>
+    <p><a href="/">← Back to Artists</a></p>
+</div>
+{% endblock %}
