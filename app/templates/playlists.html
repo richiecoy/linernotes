@@ -17,15 +17,11 @@
 <div class="stats-cards">
     <div class="stat-card">
         <span class="stat-value">{{ total_playlists }}</span>
-        <span class="stat-label">API Playlists</span>
+        <span class="stat-label">Playlists</span>
     </div>
     <div class="stat-card">
         <span class="stat-value">{{ total_assignments }}</span>
         <span class="stat-label">Track Assignments</span>
-    </div>
-    <div class="stat-card">
-        <span class="stat-value">{{ nsp_count }}</span>
-        <span class="stat-label">Decade (.nsp)</span>
     </div>
     <div class="stat-card">
         <span class="stat-value {% if not navidrome_configured %}warning{% endif %}">
@@ -37,12 +33,15 @@
 
 {% if playlists %}
 <div class="playlist-sections">
-    <!-- Genre Playlists -->
     {% set genre_playlists = [] %}
     {% set special_playlists = [] %}
+    {% set decade_playlists = [] %}
+    {% set decade_names = ['1960s','1970s','1980s','1990s','2000s','2010s','2020s'] %}
     {% for p in playlists %}
         {% if p.playlist_name in ['Live', 'Acoustic'] %}
             {% set _ = special_playlists.append(p) %}
+        {% elif p.playlist_name in decade_names %}
+            {% set _ = decade_playlists.append(p) %}
         {% else %}
             {% set _ = genre_playlists.append(p) %}
         {% endif %}
@@ -80,20 +79,18 @@
     </section>
     {% endif %}
 
-    <!-- Decade Smart Playlists (info only — managed by Navidrome) -->
-    {% if nsp_count > 0 %}
+    {% if decade_playlists %}
     <section>
-        <h2>Decade Playlists <span class="badge">.nsp — managed by Navidrome</span></h2>
-        <p class="help-text">
-            These are smart playlists that Navidrome auto-imports and auto-refreshes.
-            They update automatically when you add music. Managed in Navidrome, not here.
-        </p>
+        <h2>Decade Playlists</h2>
         <div class="playlist-grid">
-            {% for decade in ['1960s','1970s','1980s','1990s','2000s','2010s','2020s'] %}
-            <div class="playlist-card nsp-card">
-                <span class="playlist-name">{{ decade }}</span>
-                <span class="playlist-count">.nsp smart playlist</span>
-            </div>
+            {% for p in decade_playlists %}
+            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
+                <span class="playlist-name">{{ p.playlist_name }}</span>
+                <span class="playlist-count">{{ p.track_count }} tracks</span>
+                {% if exclusions.get(p.playlist_name) %}
+                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
+                {% endif %}
+            </a>
             {% endfor %}
         </div>
     </section>
@@ -148,8 +145,9 @@ function genActions() {
             const parts = [];
             if (r.genre_playlists) parts.push(`${r.genre_playlists} genre`);
             if (r.special_playlists) parts.push(`${r.special_playlists} special`);
-            if (r.decade_playlists) parts.push(`${r.decade_playlists} decade .nsp`);
+            if (r.decade_playlists) parts.push(`${r.decade_playlists} decade`);
             parts.push(`${r.tracks_added} new tracks`);
+            if (r.m3u_written) parts.push(`${r.m3u_written} m3u`);
             return parts.join(', ');
         },
 

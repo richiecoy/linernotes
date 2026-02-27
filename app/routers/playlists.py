@@ -67,16 +67,6 @@ async def playlists_page(request: Request):
         nd_user = await get_setting("navidrome_username", "")
         navidrome_configured = bool(nd_url and nd_user)
 
-        # Count .nsp files
-        playlist_dir = await get_setting("playlist_path", "/playlists")
-        nsp_count = 0
-        try:
-            if os.path.isdir(playlist_dir):
-                nsp_count = len([f for f in os.listdir(playlist_dir)
-                                 if f.endswith('.nsp')])
-        except OSError:
-            pass
-
         return templates.TemplateResponse("playlists.html", {
             "request": request,
             "playlists": playlists,
@@ -85,7 +75,6 @@ async def playlists_page(request: Request):
             "total_playlists": total_playlists,
             "total_assignments": total_assignments,
             "navidrome_configured": navidrome_configured,
-            "nsp_count": nsp_count,
             "gen_state": _gen_state,
         })
     finally:
