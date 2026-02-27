@@ -4,6 +4,17 @@
 {% block content %}
 <div class="page-header">
     <h1>Artists</h1>
+    <div class="page-actions" x-data="scanState()" x-init="checkStatus()">
+        <button class="btn btn-primary" @click="startScan()" :disabled="running">
+            <span x-text="running ? `Scanning ${progress}/${total} — ${currentArtist}` : 'Scan Library'"></span>
+        </button>
+        <template x-if="lastResult && !running">
+            <span class="scan-result" x-text="`Last: ${lastResult.artists_found} artists, ${lastResult.albums_found} albums, ${lastResult.tracks_found} tracks`"></span>
+        </template>
+    </div>
+</div>
+
+<div class="stats-bar-row">
     <div class="stats-bar">
         <span class="stat"><strong>{{ total_artists }}</strong> artists</span>
         <span class="stat"><strong>{{ total_albums }}</strong> albums</span>
@@ -82,4 +93,53 @@
         {% endif %}
     </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scanState() {
+    return {
+        running: false,
+        progress: 0,
+        total: 0,
+        currentArtist: '',
+        lastResult: null,
+        pollInterval: null,
+
+        async startScan() {
+            const resp = await fetch('/scan/run', { method: 'POST' });
+            const data = await resp.json();
+            if (data.status === 'started' || data.status === 'already_running') {
+                this.running = true;
+                this.startPolling();
+            }
+        },
+
+        async checkStatus() {
+            const resp = await fetch('/scan/status');
+            const data = await resp.json();
+            this.running = data.running;
+            this.progress = data.progress;
+            this.total = data.total;
+            this.currentArtist = data.current_artist;
+            this.lastResult = data.last_result;
+            if (this.running) {
+                this.startPolling();
+            }
+        },
+
+        startPolling() {
+            if (this.pollInterval) return;
+            this.pollInterval = setInterval(async () => {
+                await this.checkStatus();
+                if (!this.running) {
+                    clearInterval(this.pollInterval);
+                    this.pollInterval = null;
+                    window.location.reload();
+                }
+            }, 2000);
+        }
+    };
+}
+</script>
 {% endblock %}

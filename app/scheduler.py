@@ -54,8 +54,18 @@ async def init_scheduler():
 async def run_library_scan():
     """Scheduled library scan job."""
     logger.info("Scheduled library scan starting...")
-    # Will be wired to library_scanner service in phase 2
-    logger.info("Library scan placeholder complete")
+    from app.database import get_db, get_setting
+    from app.services.library_scanner import scan_library
+
+    music_path = await get_setting("library_path", "/music")
+    db = await get_db()
+    try:
+        stats = await scan_library(db, music_path)
+        logger.info("Scheduled scan complete: %s", stats)
+    except Exception as e:
+        logger.error("Scheduled scan failed: %s", e)
+    finally:
+        await db.close()
 
 
 async def run_metadata_enforcer():

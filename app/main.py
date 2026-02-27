@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from app import config
 from app.database import init_db
 from app.scheduler import init_scheduler
-from app.routers import artists, settings, enforcer, playlists
+from app.routers import artists, settings, enforcer, playlists, scanner
 
 # Logging
 logging.basicConfig(
@@ -63,7 +63,7 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["config"] = config
 
 # Also inject config into router templates
-for router_module in [artists, settings, enforcer, playlists]:
+for router_module in [artists, settings, enforcer, playlists, scanner]:
     if hasattr(router_module, 'templates'):
         router_module.templates.env.globals["config"] = config
 
@@ -72,6 +72,7 @@ app.include_router(artists.router)
 app.include_router(settings.router)
 app.include_router(enforcer.router)
 app.include_router(playlists.router)
+app.include_router(scanner.router)
 
 
 if __name__ == "__main__":
