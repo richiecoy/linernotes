@@ -3,16 +3,19 @@ LinerNotes Playlist Generator
 
 Playlist types:
   - Decade playlists → .nsp smart playlists (Navidrome auto-imports, auto-refreshes)
-  - Genre playlists  → API-synced to Navidrome with exclusion tracking
-  - Live playlist    → API-synced (from albums.is_live)
-  - Acoustic playlist→ API-synced (from albums.is_acoustic)
+  - Genre playlists  → .m3u files in music root (Navidrome auto-imports on scan)
+  - Live playlist    → .m3u file
+  - Acoustic playlist→ .m3u file
 
-Sync flow for API-managed playlists:
-  1. Build track list from LinerNotes DB
-  2. Incrementally add new tracks to playlist_tracks (skip excluded)
-  3. Build Navidrome path→song_id mapping
-  4. Detect manual removals in Navidrome → add to playlist_exclusions
-  5. Push new tracks to Navidrome playlist
+All playlists tracked in playlist_tracks for LinerNotes' own records.
+Exclusion tracking: compare Navidrome playlist contents via API to detect
+manual removals, then exclude those tracks from future M3U writes.
+
+Navidrome sync flow:
+  1. On first run: M3U files created, Navidrome imports them
+  2. On subsequent runs: check Navidrome playlists for removals → exclusions
+  3. Rewrite M3U with current playlist_tracks (excluding removed)
+  4. Navidrome picks up changes on next library scan
 """
 import os
 import json
@@ -45,9 +48,10 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
                               progress_callback=None) -> dict:
     """
     Generate all playlists:
-    1. Decade .nsp smart playlists (written once, Navidrome auto-refreshes)
-    2. Genre playlists (API-synced, exclusion-tracked)
-    3. Live + Acoustic playlists (API-synced, exclusion-tracked)
+    1. Decade .nsp smart playlists (Navidrome auto-refreshes)
+    2. Genre playlists → playlist_tracks + M3U files
+    3. Live + Acoustic → playlist_tracks + M3U files
+    4. Navidrome removal detection (if configured)
     """
     stats = {
         'genre_playlists': 0,
@@ -58,6 +62,7 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
         'tracks_already_in': 0,
         'playlists_synced': 0,
         'nsp_written': 0,
+        'm3u_written': 0,
         'errors': 0,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'finished_at': None,
@@ -73,8 +78,9 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
     # ── 2. Genre playlists ────────────────────────────────────────────
     cursor = await db.execute("""
         SELECT t.id as track_id, t.filename, t.title,
+               t.disc_number, t.track_number, t.duration_seconds,
                a.name as artist_name, al.folder_name as album_folder,
-               al.year, t.disc_number, t.track_number,
+               al.year,
                COALESCE(a.manual_override, a.resolved_genre) as genre
         FROM tracks t
         JOIN albums al ON t.album_id = al.id
@@ -86,7 +92,6 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
     all_tracks = await cursor.fetchall()
     logger.info("Generating playlists from %d tracks", len(all_tracks))
 
-    # Bucket by genre
     genre_buckets = {}
     for track in all_tracks:
         genre = track['genre']
@@ -97,8 +102,9 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
     for playlist_name, db_column in SPECIAL_PLAYLISTS.items():
         cursor = await db.execute(f"""
             SELECT t.id as track_id, t.filename, t.title,
+                   t.disc_number, t.track_number, t.duration_seconds,
                    a.name as artist_name, al.folder_name as album_folder,
-                   al.year, t.disc_number, t.track_number,
+                   al.year,
                    COALESCE(a.manual_override, a.resolved_genre) as genre
             FROM tracks t
             JOIN albums al ON t.album_id = al.id
@@ -111,22 +117,19 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
         if tracks:
             special_buckets[playlist_name] = tracks
 
-    # Count total for progress
+    # ── 4. Navidrome removal detection (before adding new tracks) ─────
+    if navidrome_url and navidrome_user and navidrome_pass:
+        removal_result = await _detect_navidrome_removals(
+            db, navidrome_url, navidrome_user, navidrome_pass
+        )
+        stats['playlists_synced'] = removal_result.get('checked', 0)
+        if removal_result.get('removals', 0):
+            logger.info("Detected %d manual removals", removal_result['removals'])
+
+    # ── 5. Update playlist_tracks + write M3U files ───────────────────
     total_playlists = len(genre_buckets) + len(special_buckets)
     current = 0
 
-    # Snapshot existing playlist_tracks BEFORE adding new ones.
-    # Only these should be checked for Navidrome removal detection —
-    # newly added tracks haven't been synced yet, so their absence
-    # from a Navidrome playlist is expected, not a manual removal.
-    cursor = await db.execute(
-        "SELECT playlist_name, track_id FROM playlist_tracks"
-    )
-    pre_existing = {}
-    for row in await cursor.fetchall():
-        pre_existing.setdefault(row['playlist_name'], set()).add(row['track_id'])
-
-    # Process genre playlists
     for genre, tracks in sorted(genre_buckets.items()):
         current += 1
         if progress_callback:
@@ -138,10 +141,14 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
         stats['tracks_excluded'] += result['excluded']
         stats['tracks_already_in'] += result['already_in']
 
+        if playlist_path:
+            wrote = await _write_m3u(db, genre, music_path, playlist_path)
+            if wrote:
+                stats['m3u_written'] += 1
+
         await _log_action(db, genre, 'generate', result['total'],
                           {'added': result['added'], 'excluded': result['excluded']})
 
-    # Process special playlists
     for name, tracks in sorted(special_buckets.items()):
         current += 1
         if progress_callback:
@@ -153,26 +160,23 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
         stats['tracks_excluded'] += result['excluded']
         stats['tracks_already_in'] += result['already_in']
 
+        if playlist_path:
+            wrote = await _write_m3u(db, name, music_path, playlist_path)
+            if wrote:
+                stats['m3u_written'] += 1
+
         await _log_action(db, name, 'generate', result['total'],
                           {'added': result['added'], 'excluded': result['excluded']})
 
     await db.commit()
 
-    # ── 4. Navidrome sync ─────────────────────────────────────────────
-    if navidrome_url and navidrome_user and navidrome_pass:
-        sync_result = await _sync_to_navidrome(
-            db, navidrome_url, navidrome_user, navidrome_pass,
-            pre_existing_tracks=pre_existing
-        )
-        stats['playlists_synced'] = sync_result.get('synced', 0)
-        stats['errors'] += sync_result.get('errors', 0)
-
     stats['finished_at'] = datetime.now(timezone.utc).isoformat()
     logger.info(
         "Playlist generation complete: %d genre, %d special, %d decade (.nsp), "
-        "%d added, %d excluded",
+        "%d m3u, %d added, %d excluded",
         stats['genre_playlists'], stats['special_playlists'],
-        stats['decade_playlists'], stats['tracks_added'], stats['tracks_excluded']
+        stats['decade_playlists'], stats['m3u_written'],
+        stats['tracks_added'], stats['tracks_excluded']
     )
     return stats
 
@@ -184,8 +188,7 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
 async def _write_decade_nsp_files(playlist_path: str) -> int:
     """
     Write Navidrome Smart Playlist (.nsp) files for each decade.
-    These are JSON query definitions — Navidrome auto-imports and
-    auto-refreshes them. Idempotent: safe to overwrite each run.
+    Idempotent: safe to overwrite each run.
     """
     os.makedirs(playlist_path, exist_ok=True)
     count = 0
@@ -211,16 +214,14 @@ async def _write_decade_nsp_files(playlist_path: str) -> int:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# INCREMENTAL PLAYLIST UPDATE (genre, live, acoustic)
+# INCREMENTAL PLAYLIST UPDATE
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _update_playlist(db, playlist_name: str,
                            qualifying_tracks: list) -> dict:
     """
     Incrementally update a playlist in playlist_tracks.
-    - Skip tracks already present
-    - Skip tracks in playlist_exclusions (manually removed)
-    - Add everything else
+    Skip tracks already present or in exclusions.
     """
     result = {'added': 0, 'excluded': 0, 'already_in': 0, 'total': 0}
 
@@ -260,16 +261,90 @@ async def _update_playlist(db, playlist_name: str,
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# NAVIDROME SYNC (API-managed playlists only, not .nsp)
+# M3U FILE WRITING
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _build_path_maps(db) -> tuple:
+async def _write_m3u(db, playlist_name: str, music_path: str,
+                     playlist_path: str) -> bool:
     """
-    Build mappings for matching our tracks to Navidrome songs.
-    Uses artist_name/filename as the match key (skipping album folder)
-    because album folder names can differ between our DB and Navidrome
-    (e.g. we store "Album (2005)" but filesystem has "Album").
+    Write an M3U playlist file using real filesystem paths.
+    Navidrome auto-imports these from the music/playlist directory.
+
+    Paths are absolute: /music/Artist/Album (Year)/filename.mp3
+    This matches what Navidrome sees on its filesystem.
     """
+    try:
+        os.makedirs(playlist_path, exist_ok=True)
+
+        cursor = await db.execute("""
+            SELECT t.filename, t.title, t.duration_seconds,
+                   a.name as artist_name, al.folder_name as album_folder
+            FROM playlist_tracks pt
+            JOIN tracks t ON pt.track_id = t.id
+            JOIN albums al ON t.album_id = al.id
+            JOIN artists a ON al.artist_id = a.id
+            WHERE pt.playlist_name = ?
+            ORDER BY a.name, al.year, t.disc_number, t.track_number
+        """, (playlist_name,))
+        tracks = await cursor.fetchall()
+
+        if not tracks:
+            return False
+
+        filepath = os.path.join(playlist_path, f"{playlist_name}.m3u")
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write('#EXTM3U\n')
+            f.write(f'#PLAYLIST:{playlist_name}\n')
+            for track in tracks:
+                duration = int(track['duration_seconds'] or 0)
+                artist = track['artist_name']
+                title = track['title'] or track['filename']
+                # Absolute path as Navidrome sees it
+                abs_path = os.path.join(
+                    music_path,
+                    track['artist_name'],
+                    track['album_folder'],
+                    track['filename']
+                )
+                f.write(f'#EXTINF:{duration},{artist} - {title}\n')
+                f.write(f'{abs_path}\n')
+
+        logger.debug("Wrote M3U: %s (%d tracks)", filepath, len(tracks))
+        return True
+
+    except Exception as e:
+        logger.error("Failed to write M3U for '%s': %s", playlist_name, e)
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# NAVIDROME REMOVAL DETECTION
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _detect_navidrome_removals(db, base_url: str, username: str,
+                                     password: str) -> dict:
+    """
+    Compare Navidrome playlist contents against our playlist_tracks.
+    Tracks in our DB but removed from Navidrome = user exclusion.
+
+    Matching strategy: build a set of filesystem paths from Navidrome's
+    playlist entries and compare against our known paths.
+    Navidrome returns real filesystem paths in getPlaylist entries.
+    """
+    from app.services.navidrome import get_playlists, get_playlist
+
+    result = {'checked': 0, 'removals': 0, 'errors': 0}
+
+    # Get our playlists
+    cursor = await db.execute(
+        "SELECT DISTINCT playlist_name FROM playlist_tracks"
+    )
+    ln_playlists = [row['playlist_name'] for row in await cursor.fetchall()]
+    if not ln_playlists:
+        return result
+
+    # Build our track_id → filesystem path map
     cursor = await db.execute("""
         SELECT t.id as track_id, t.filename,
                a.name as artist_name, al.folder_name as album_folder
@@ -278,223 +353,92 @@ async def _build_path_maps(db) -> tuple:
         JOIN artists a ON al.artist_id = a.id
         WHERE al.in_library = 1
     """)
-    rows = await cursor.fetchall()
+    track_to_path = {}
+    for row in await cursor.fetchall():
+        # Path fragment: "Artist/Album/filename" — no leading /music/
+        path = f"{row['artist_name']}/{row['album_folder']}/{row['filename']}"
+        track_to_path[row['track_id']] = path
 
-    # Match key = "artist/filename" (skip album folder)
-    key_to_track = {}
-    track_to_key = {}
-    for row in rows:
-        match_key = f"{row['artist_name']}/{row['filename']}"
-        key_to_track[match_key] = row['track_id']
-        track_to_key[row['track_id']] = match_key
-
-    return key_to_track, track_to_key
-
-
-async def _build_nd_song_cache(base_url: str, username: str, password: str,
-                                artist_names: list) -> dict:
-    """
-    Build a Navidrome match_key → song_id cache by searching for each artist.
-    Match key = "artist_dir/filename" extracted from Navidrome's full path.
-    This avoids album folder mismatches (e.g. "(2005)" suffix differences).
-    """
-    from app.services.navidrome import search_songs
-
-    nd_key_to_id = {}
-    searched = set()
-
-    for artist in artist_names:
-        if artist in searched:
-            continue
-        searched.add(artist)
-
-        songs = await search_songs(base_url, username, password,
-                                   artist, count=500)
-        for song in songs:
-            path = song.get('path', '')
-            song_id = song.get('id', '')
-            if path and song_id:
-                # path = "Artist/Album/filename.mp3"
-                # match key = "Artist/filename.mp3" (skip album)
-                parts = path.split('/')
-                if len(parts) >= 2:
-                    match_key = f"{parts[0]}/{parts[-1]}"
-                    nd_key_to_id[match_key] = song_id
-
-    logger.info("Built Navidrome song cache: %d songs from %d artists",
-                len(nd_key_to_id), len(searched))
-    return nd_key_to_id
-
-
-async def _sync_to_navidrome(db, base_url: str, username: str,
-                             password: str,
-                             pre_existing_tracks: dict = None) -> dict:
-    """
-    Sync API-managed playlists to Navidrome:
-    1. Build path mappings (our DB ↔ Navidrome song IDs)
-    2. For each playlist in playlist_tracks:
-       a. New playlist → create in Navidrome with song IDs
-       b. Existing playlist → detect removals → add to exclusions
-       c. Push new tracks to Navidrome playlist
-
-    pre_existing_tracks: {playlist_name: set(track_ids)} — tracks that were
-    in playlist_tracks BEFORE this run. Only these are checked for removal
-    detection. Newly added tracks are expected to be absent from Navidrome.
-    """
-    from app.services.navidrome import (
-        get_playlists, get_playlist, create_playlist, update_playlist
-    )
-
-    result = {'synced': 0, 'errors': 0, 'removals_detected': 0}
-
-    path_to_track, track_to_path = await _build_path_maps(db)
-
-    # Get all distinct playlist names from playlist_tracks
-    cursor = await db.execute(
-        "SELECT DISTINCT playlist_name FROM playlist_tracks"
-    )
-    ln_playlists = [row['playlist_name'] for row in await cursor.fetchall()]
-    if not ln_playlists:
-        return result
-
-    # Get unique artist names for song cache
-    cursor = await db.execute("""
-        SELECT DISTINCT a.name
-        FROM playlist_tracks pt
-        JOIN tracks t ON pt.track_id = t.id
-        JOIN albums al ON t.album_id = al.id
-        JOIN artists a ON al.artist_id = a.id
-    """)
-    artist_names = [row['name'] for row in await cursor.fetchall()]
-
-    # Build Navidrome match_key→song_id cache
-    nd_key_to_id = await _build_nd_song_cache(
-        base_url, username, password, artist_names
-    )
-
-    # Get existing Navidrome playlists
+    # Get Navidrome playlists
     nd_playlists = await get_playlists(base_url, username, password)
     nd_by_name = {p['name']: p for p in nd_playlists}
 
     for playlist_name in ln_playlists:
+        if playlist_name not in nd_by_name:
+            continue  # Not yet in Navidrome, skip
+
         try:
-            # Get our track IDs for this playlist
+            nd_playlist = await get_playlist(
+                base_url, username, password,
+                nd_by_name[playlist_name]['id']
+            )
+
+            if 'error' in nd_playlist:
+                result['errors'] += 1
+                continue
+
+            # Get paths from Navidrome playlist entries
+            nd_entries = nd_playlist.get('entry', [])
+            if isinstance(nd_entries, dict):
+                nd_entries = [nd_entries]
+
+            # Navidrome paths are absolute: /music/Artist/Album/file.mp3
+            # Normalize by stripping any leading path prefix to get
+            # just "Artist/Album/file.mp3"
+            nd_paths = set()
+            for entry in nd_entries:
+                path = entry.get('path', '')
+                if path:
+                    # Strip leading /music/ or whatever the mount is
+                    # We just need the relative part: Artist/Album/file
+                    parts = path.split('/')
+                    # Find the artist-level start (skip mount prefix)
+                    # The path from M3U shows /music/Artist/Album/file
+                    # So strip everything before the artist dir
+                    if len(parts) >= 3:
+                        # Take last 3 parts: Artist/Album/file
+                        rel = '/'.join(parts[-3:])
+                        nd_paths.add(rel)
+
+            # Get our tracks for this playlist
             cursor = await db.execute(
                 "SELECT track_id FROM playlist_tracks WHERE playlist_name = ?",
                 (playlist_name,)
             )
-            our_track_ids = {row['track_id'] for row in await cursor.fetchall()}
+            our_track_ids = [row['track_id'] for row in await cursor.fetchall()]
 
-            # Build match key map for this playlist
-            our_keys = {}
-            for tid in our_track_ids:
-                key = track_to_path.get(tid)
-                if key:
-                    our_keys[key] = tid
-
-            if playlist_name in nd_by_name:
-                # ── Existing playlist: detect removals + add new ──
-                nd_playlist_data = await get_playlist(
-                    base_url, username, password,
-                    nd_by_name[playlist_name]['id']
-                )
-
-                if 'error' in nd_playlist_data:
-                    result['errors'] += 1
+            for track_id in our_track_ids:
+                our_path = track_to_path.get(track_id)
+                if not our_path:
                     continue
 
-                nd_entries = nd_playlist_data.get('entry', [])
-                if isinstance(nd_entries, dict):
-                    nd_entries = [nd_entries]
-
-                # Build match keys from Navidrome entries
-                nd_keys = set()
-                for e in nd_entries:
-                    path = e.get('path', '')
-                    if path:
-                        parts = path.split('/')
-                        if len(parts) >= 2:
-                            nd_keys.add(f"{parts[0]}/{parts[-1]}")
-
-                # Detect removals: track was previously synced (in pre_existing)
-                # + exists in Navidrome library, but NOT in this Navidrome
-                # playlist = user manually removed it.
-                # Only check pre-existing tracks — newly added ones haven't
-                # been synced yet so their absence is expected.
-                previously_synced = pre_existing_tracks.get(playlist_name, set()) \
-                    if pre_existing_tracks else our_track_ids
-
-                for key, track_id in our_keys.items():
-                    if track_id not in previously_synced:
-                        continue  # New this run, skip removal check
-                    if key not in nd_keys and key in nd_key_to_id:
-                        await db.execute(
-                            """INSERT OR IGNORE INTO playlist_exclusions
-                               (playlist_name, track_id, excluded_at)
-                               VALUES (?, ?, datetime('now'))""",
-                            (playlist_name, track_id)
-                        )
-                        await db.execute(
-                            """DELETE FROM playlist_tracks
-                               WHERE playlist_name = ? AND track_id = ?""",
-                            (playlist_name, track_id)
-                        )
-                        result['removals_detected'] += 1
-                        logger.info(
-                            "Detected removal: '%s' track_id=%d (%s)",
-                            playlist_name, track_id, key
-                        )
-
-                # Add new tracks not yet in Navidrome playlist
-                new_song_ids = []
-                for key, track_id in our_keys.items():
-                    if key not in nd_keys:
-                        nd_song_id = nd_key_to_id.get(key)
-                        if nd_song_id:
-                            new_song_ids.append(nd_song_id)
-
-                if new_song_ids:
-                    await update_playlist(
-                        base_url, username, password,
-                        nd_by_name[playlist_name]['id'],
-                        song_ids_to_add=new_song_ids
+                if our_path not in nd_paths:
+                    # Track is in our DB but not in Navidrome playlist
+                    # = user manually removed it
+                    await db.execute(
+                        """INSERT OR IGNORE INTO playlist_exclusions
+                           (playlist_name, track_id, excluded_at)
+                           VALUES (?, ?, datetime('now'))""",
+                        (playlist_name, track_id)
                     )
-                    logger.info("Added %d tracks to Navidrome '%s'",
-                                len(new_song_ids), playlist_name)
+                    await db.execute(
+                        """DELETE FROM playlist_tracks
+                           WHERE playlist_name = ? AND track_id = ?""",
+                        (playlist_name, track_id)
+                    )
+                    result['removals'] += 1
+                    logger.info(
+                        "Detected removal: '%s' track_id=%d (%s)",
+                        playlist_name, track_id, our_path
+                    )
 
-                result['synced'] += 1
-
-            else:
-                # ── New playlist: create with all song IDs ──
-                song_ids = []
-                for key in our_keys:
-                    nd_song_id = nd_key_to_id.get(key)
-                    if nd_song_id:
-                        song_ids.append(nd_song_id)
-
-                playlist_id = await create_playlist(
-                    base_url, username, password,
-                    playlist_name, song_ids=song_ids if song_ids else None
-                )
-                if playlist_id:
-                    result['synced'] += 1
-                    logger.info("Created Navidrome playlist '%s' (%d tracks)",
-                                playlist_name, len(song_ids))
-                else:
-                    result['errors'] += 1
-
-            await _log_action(db, playlist_name, 'navidrome_sync', 0, None)
+            result['checked'] += 1
 
         except Exception as e:
             result['errors'] += 1
-            logger.error("Navidrome sync failed for '%s': %s", playlist_name, e)
+            logger.error("Removal check failed for '%s': %s", playlist_name, e)
 
     await db.commit()
-
-    if result['removals_detected']:
-        logger.info("Detected %d manual removals across all playlists",
-                     result['removals_detected'])
-
     return result
 
 
