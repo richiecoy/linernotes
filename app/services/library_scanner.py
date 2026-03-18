@@ -209,12 +209,18 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
         for album_name in album_dirs:
             album_path = os.path.join(artist_path, album_name)
 
-            # Check for audio files
-            audio_files = []
+            # Check for audio files (including disc subfolders)
+            audio_files = []  # list of (relative_path, filename) tuples
             try:
-                for f in os.listdir(album_path):
-                    if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS:
-                        audio_files.append(f)
+                for entry in os.listdir(album_path):
+                    entry_path = os.path.join(album_path, entry)
+                    if os.path.isfile(entry_path) and os.path.splitext(entry)[1].lower() in AUDIO_EXTENSIONS:
+                        audio_files.append(('', entry))
+                    elif os.path.isdir(entry_path) and not entry.startswith('.'):
+                        # Recurse one level into disc subfolders
+                        for f in os.listdir(entry_path):
+                            if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS:
+                                audio_files.append((entry, f))
             except PermissionError:
                 logger.warning("Cannot read album directory: %s", album_path)
                 stats['errors'] += 1
@@ -248,9 +254,11 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
             existing_tracks = {row['filename']: row['id'] for row in await cursor.fetchall()}
 
             # Process each audio file
-            for audio_file in sorted(audio_files):
+            for subdir, audio_file in sorted(audio_files):
                 stats['tracks_found'] += 1
-                filepath = os.path.join(album_path, audio_file)
+                # Store relative path including disc subfolder
+                relative_name = os.path.join(subdir, audio_file) if subdir else audio_file
+                filepath = os.path.join(album_path, relative_name)
 
                 # Read metadata
                 try:
@@ -260,9 +268,9 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
                     stats['errors'] += 1
                     continue
 
-                if audio_file in existing_tracks:
+                if relative_name in existing_tracks:
                     # Update existing track if genre changed
-                    track_id = existing_tracks[audio_file]
+                    track_id = existing_tracks[relative_name]
                     await db.execute(
                         """UPDATE tracks SET
                            title = ?, track_number = ?, disc_number = ?,
@@ -283,7 +291,7 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
                             duration_seconds, file_format, current_genre_tag,
                             created_at, updated_at)
                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))""",
-                        (album_id, audio_file, meta['title'], meta['track_number'],
+                        (album_id, relative_name, meta['title'], meta['track_number'],
                          meta['disc_number'], meta['duration_seconds'],
                          meta['file_format'], meta['genre'])
                     )
