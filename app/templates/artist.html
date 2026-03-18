@@ -41,7 +41,7 @@
                   class="override-form" x-cloak>
                 <select name="genre">
                     <option value="">— Clear override —</option>
-                    {% for g in ['Alternative', 'Rock', 'Metal', 'Punk', 'Pop', 'Hip Hop', 'R&B',
+                    {% for g in ['Alternative', 'Rock', 'Soft Rock', 'Metal', 'Punk', 'Pop', 'Hip Hop', 'R&B',
                                  'Electronic', 'Country', 'Folk', 'Jazz', 'Classical', 'Reggae', 'Soundtrack'] %}
                     <option value="{{ g }}"
                         {% if artist.manual_override == g %}selected{% endif %}>{{ g }}</option>
