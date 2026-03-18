@@ -1,6 +1,6 @@
 """
 LinerNotes Genre Resolver
-Maps MusicBrainz genres to 14 master categories.
+Maps MusicBrainz genres to 15 master categories.
 Handles manual overrides and genre weight calculation.
 """
 import re
@@ -13,7 +13,7 @@ logger = logging.getLogger("linernotes.genre_resolver")
 # 14 MASTER GENRES
 # ============================================================================
 MASTER_GENRES = [
-    'Alternative', 'Rock', 'Metal', 'Punk', 'Pop', 'Hip Hop', 'R&B',
+    'Alternative', 'Rock', 'Soft Rock', 'Metal', 'Punk', 'Pop', 'Hip Hop', 'R&B',
     'Electronic', 'Country', 'Folk', 'Jazz', 'Classical', 'Reggae', 'Soundtrack',
 ]
 
@@ -68,6 +68,17 @@ GENRE_MAP = [
     (r'\bindie\b', 'Alternative'),
     (r'\balternative\b', 'Alternative'),
 
+    # --- Soft Rock (melodic, radio-friendly) ---
+    (r'\bsoft rock\b', 'Soft Rock'),
+    (r'\bpop rock\b', 'Soft Rock'),
+    (r'\bpiano rock\b', 'Soft Rock'),
+    (r'\badult contemporary\b', 'Soft Rock'),
+    (r'\byacht rock\b', 'Soft Rock'),
+    (r'\bheartland rock\b', 'Soft Rock'),
+    (r'\bfolk rock\b', 'Soft Rock'),
+    (r'\bcountry rock\b', 'Soft Rock'),
+    (r'\bsinger-songwriter\b', 'Soft Rock'),
+
     # --- Rock (absorbs classic, hard, prog, blues rock) ---
     (r'\bhard rock\b', 'Rock'),
     (r'\bclassic rock\b', 'Rock'),
@@ -85,11 +96,7 @@ GENRE_MAP = [
     (r'\bglam metal\b', 'Rock'),
     (r'\bpop metal\b', 'Rock'),
     (r'\bblues rock\b', 'Rock'),
-    (r'\bcountry rock\b', 'Rock'),
     (r'\bsouthern rock\b', 'Rock'),
-    (r'\bfolk rock\b', 'Rock'),
-    (r'\bpop rock\b', 'Rock'),
-    (r'\bsoft rock\b', 'Rock'),
     (r'\brock and roll\b', 'Rock'),
     (r'\brock\b', 'Rock'),
 
@@ -159,7 +166,6 @@ GENRE_MAP = [
 
     # --- Folk ---
     (r'\bfolk\b', 'Folk'),
-    (r'\bsinger-songwriter\b', 'Folk'),
 
     # --- Jazz ---
     (r'\bacid jazz\b', 'Jazz'),
