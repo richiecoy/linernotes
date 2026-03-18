@@ -122,6 +122,7 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
         'tracks_updated': 0,
         'artists_removed': 0,
         'albums_removed': 0,
+        'mb_ghosts_removed': 0,
         'errors': 0,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'finished_at': None,
@@ -335,15 +336,28 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
     if artists_removed or albums_removed:
         await db.commit()
 
+    # Cleanup: remove ghost MB albums (in_library=0 with no tracks)
+    cursor = await db.execute("""
+        DELETE FROM albums
+        WHERE in_library = 0
+          AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
+    """)
+    mb_ghosts_removed = cursor.rowcount
+    if mb_ghosts_removed:
+        await db.commit()
+        logger.info("Removed %d ghost MB albums with no tracks", mb_ghosts_removed)
+
     stats['artists_removed'] = artists_removed
     stats['albums_removed'] = albums_removed
+    stats['mb_ghosts_removed'] = mb_ghosts_removed
 
     logger.info(
-        "Scan complete: %d artists (%d new, %d removed), %d albums (%d new, %d removed), %d tracks (%d new, %d updated), %d errors",
+        "Scan complete: %d artists (%d new, %d removed), %d albums (%d new, %d removed), "
+        "%d tracks (%d new, %d updated), %d MB ghosts removed, %d errors",
         stats['artists_found'], stats['artists_new'], stats['artists_removed'],
         stats['albums_found'], stats['albums_new'], stats['albums_removed'],
         stats['tracks_found'], stats['tracks_new'], stats['tracks_updated'],
-        stats['errors']
+        stats['mb_ghosts_removed'], stats['errors']
     )
 
     return stats
