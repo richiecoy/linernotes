@@ -84,7 +84,9 @@ function enforcerActions() {
             const r = this.lastResult;
             if (r.error) return `Error: ${r.error}`;
             const mode = r.dry_run ? 'Dry run' : 'Applied';
-            return `${mode}: ${r.tracks_checked} checked, ${r.tracks_mismatched} mismatched, ${r.tracks_updated} updated`;
+            const parts = [`${r.tracks_checked} checked`, `${r.tracks_mismatched} mismatched`, `${r.tracks_updated} updated`];
+            if (r.tracks_failed) parts.push(`${r.tracks_failed} failed`);
+            return `${mode}: ${parts.join(', ')}`;
         },
 
         async runDryRun() {

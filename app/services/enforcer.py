@@ -1,7 +1,8 @@
 """
 LinerNotes Metadata Enforcer
-Compares audio file genre tags against resolved artist genres.
-Optionally writes corrections via mutagen.
+Reads actual genre tags from audio files and compares against
+resolved artist genres. Optionally writes corrections via mutagen.
+Never trusts the DB for current tag state — always reads from disk.
 """
 import os
 import json
@@ -99,7 +100,7 @@ async def run_enforcer(db, music_path: str, dry_run: bool = True,
 
             # Get tracks for this album
             cursor = await db.execute("""
-                SELECT id, filename, current_genre_tag
+                SELECT id, filename
                 FROM tracks WHERE album_id = ?
             """, (album_id,))
             tracks = await cursor.fetchall()
@@ -108,18 +109,34 @@ async def run_enforcer(db, music_path: str, dry_run: bool = True,
                 stats['tracks_checked'] += 1
                 track_id = track['id']
                 filename = track['filename']
-                current_tag = track['current_genre_tag']
 
-                # Compare
+                filepath = os.path.join(music_path, artist_name, folder_name, filename)
+
+                # Read actual genre tag from the file, not the DB
+                if os.path.isfile(filepath):
+                    current_tag = read_genre_tag(filepath)
+                else:
+                    stats['tracks_failed'] += 1
+                    logger.warning("File not found: %s", filepath)
+                    await db.execute(
+                        """INSERT INTO enforcer_log
+                           (track_id, artist_name, album_name, track_filename,
+                            old_value, new_value, status, error_message, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, 'failed', 'File not found', datetime('now'))""",
+                        (track_id, artist_name, folder_name, filename,
+                         None, expected_genre)
+                    )
+                    continue
+
+                # Compare actual file tag to expected
                 if current_tag == expected_genre:
                     stats['tracks_correct'] += 1
-                    # Update track record
                     await db.execute(
                         """UPDATE tracks SET
-                           expected_genre_tag = ?, needs_update = 0,
+                           current_genre_tag = ?, expected_genre_tag = ?, needs_update = 0,
                            last_checked = datetime('now'), updated_at = datetime('now')
                            WHERE id = ?""",
-                        (expected_genre, track_id)
+                        (current_tag, expected_genre, track_id)
                     )
                     continue
 
@@ -129,16 +146,14 @@ async def run_enforcer(db, music_path: str, dry_run: bool = True,
                     stats['tracks_no_genre'] += 1
                     continue
 
-                filepath = os.path.join(music_path, artist_name, folder_name, filename)
-
                 if dry_run:
-                    # Just mark as needing update
+                    # Mark as needing update, sync current_genre_tag to actual file
                     await db.execute(
                         """UPDATE tracks SET
-                           expected_genre_tag = ?, needs_update = 1,
+                           current_genre_tag = ?, expected_genre_tag = ?, needs_update = 1,
                            last_checked = datetime('now'), updated_at = datetime('now')
                            WHERE id = ?""",
-                        (expected_genre, track_id)
+                        (current_tag, expected_genre, track_id)
                     )
                     # Log the planned change
                     await db.execute(
@@ -150,40 +165,36 @@ async def run_enforcer(db, music_path: str, dry_run: bool = True,
                          current_tag, expected_genre)
                     )
                 else:
-                    # Actually write the tag
-                    if os.path.isfile(filepath):
-                        success = write_genre_tag(filepath, expected_genre)
-                        if success:
-                            stats['tracks_updated'] += 1
-                            await db.execute(
-                                """UPDATE tracks SET
-                                   current_genre_tag = ?, expected_genre_tag = ?,
-                                   needs_update = 0, last_checked = datetime('now'),
-                                   updated_at = datetime('now')
-                                   WHERE id = ?""",
-                                (expected_genre, expected_genre, track_id)
-                            )
-                            await db.execute(
-                                """INSERT INTO enforcer_log
-                                   (track_id, artist_name, album_name, track_filename,
-                                    old_value, new_value, status, created_at)
-                                   VALUES (?, ?, ?, ?, ?, ?, 'applied', datetime('now'))""",
-                                (track_id, artist_name, folder_name, filename,
-                                 current_tag, expected_genre)
-                            )
-                        else:
-                            stats['tracks_failed'] += 1
-                            await db.execute(
-                                """INSERT INTO enforcer_log
-                                   (track_id, artist_name, album_name, track_filename,
-                                    old_value, new_value, status, error_message, created_at)
-                                   VALUES (?, ?, ?, ?, ?, ?, 'failed', 'Write failed', datetime('now'))""",
-                                (track_id, artist_name, folder_name, filename,
-                                 current_tag, expected_genre)
-                            )
+                    # Actually write the tag (file existence already confirmed)
+                    success = write_genre_tag(filepath, expected_genre)
+                    if success:
+                        stats['tracks_updated'] += 1
+                        await db.execute(
+                            """UPDATE tracks SET
+                               current_genre_tag = ?, expected_genre_tag = ?,
+                               needs_update = 0, last_checked = datetime('now'),
+                               updated_at = datetime('now')
+                               WHERE id = ?""",
+                            (expected_genre, expected_genre, track_id)
+                        )
+                        await db.execute(
+                            """INSERT INTO enforcer_log
+                               (track_id, artist_name, album_name, track_filename,
+                                old_value, new_value, status, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, 'applied', datetime('now'))""",
+                            (track_id, artist_name, folder_name, filename,
+                             current_tag, expected_genre)
+                        )
                     else:
                         stats['tracks_failed'] += 1
-                        logger.warning("File not found: %s", filepath)
+                        await db.execute(
+                            """INSERT INTO enforcer_log
+                               (track_id, artist_name, album_name, track_filename,
+                                old_value, new_value, status, error_message, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, 'failed', 'Write failed', datetime('now'))""",
+                            (track_id, artist_name, folder_name, filename,
+                             current_tag, expected_genre)
+                        )
 
         await db.commit()
 
