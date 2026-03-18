@@ -16,83 +16,63 @@
 
 <div class="stats-cards">
     <div class="stat-card">
-        <span class="stat-value">{{ total_playlists }}</span>
-        <span class="stat-label">Playlists</span>
+        <span class="stat-value">{{ total_nsp }}</span>
+        <span class="stat-label">Smart Playlists</span>
     </div>
     <div class="stat-card">
-        <span class="stat-value">{{ total_assignments }}</span>
-        <span class="stat-label">Track Assignments</span>
+        <span class="stat-value">{{ total_m3u }}</span>
+        <span class="stat-label">M3U Playlists</span>
     </div>
 </div>
 
-{% if playlists %}
-<div class="playlist-sections">
-    {% set genre_playlists = [] %}
-    {% set special_playlists = [] %}
-    {% set decade_playlists = [] %}
-    {% set decade_names = ['1960s','1970s','1980s','1990s','2000s','2010s','2020s'] %}
-    {% for p in playlists %}
-        {% if p.playlist_name in ['Live', 'Acoustic'] %}
-            {% set _ = special_playlists.append(p) %}
-        {% elif p.playlist_name in decade_names %}
-            {% set _ = decade_playlists.append(p) %}
-        {% else %}
-            {% set _ = genre_playlists.append(p) %}
-        {% endif %}
-    {% endfor %}
-
-    <section>
-        <h2>Genre Playlists</h2>
-        <div class="playlist-grid">
-            {% for p in genre_playlists %}
-            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
-                <span class="playlist-name">{{ p.playlist_name }}</span>
-                <span class="playlist-count">{{ p.track_count }} tracks</span>
-                {% if exclusions.get(p.playlist_name) %}
-                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
-                {% endif %}
-            </a>
-            {% endfor %}
+{% if genre_nsp %}
+<section>
+    <h2>Genre Playlists <span class="section-badge">Smart — Favorites</span></h2>
+    <div class="playlist-grid">
+        {% for nsp in genre_nsp %}
+        <div class="playlist-card nsp-card">
+            <span class="playlist-name">{{ nsp.name }}</span>
+            <span class="playlist-type">{{ nsp.comment }}</span>
         </div>
-    </section>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 
-    {% if special_playlists %}
-    <section>
-        <h2>Special Playlists</h2>
-        <div class="playlist-grid">
-            {% for p in special_playlists %}
-            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
-                <span class="playlist-name">{{ p.playlist_name }}</span>
-                <span class="playlist-count">{{ p.track_count }} tracks</span>
-                {% if exclusions.get(p.playlist_name) %}
-                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
-                {% endif %}
-            </a>
-            {% endfor %}
+{% if decade_nsp %}
+<section>
+    <h2>Decade Playlists <span class="section-badge">Smart</span></h2>
+    <div class="playlist-grid">
+        {% for nsp in decade_nsp %}
+        <div class="playlist-card nsp-card">
+            <span class="playlist-name">{{ nsp.name }}</span>
+            <span class="playlist-type">{{ nsp.comment }}</span>
         </div>
-    </section>
-    {% endif %}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 
-    {% if decade_playlists %}
-    <section>
-        <h2>Decade Playlists</h2>
-        <div class="playlist-grid">
-            {% for p in decade_playlists %}
-            <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
-                <span class="playlist-name">{{ p.playlist_name }}</span>
-                <span class="playlist-count">{{ p.track_count }} tracks</span>
-                {% if exclusions.get(p.playlist_name) %}
-                <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
-                {% endif %}
-            </a>
-            {% endfor %}
-        </div>
-    </section>
-    {% endif %}
-</div>
-{% else %}
+{% if m3u_playlists %}
+<section>
+    <h2>Special Playlists <span class="section-badge">M3U</span></h2>
+    <div class="playlist-grid">
+        {% for p in m3u_playlists %}
+        <a href="/playlists/{{ p.playlist_name|urlencode }}" class="playlist-card">
+            <span class="playlist-name">{{ p.playlist_name }}</span>
+            <span class="playlist-count">{{ p.track_count }} tracks</span>
+            {% if exclusions.get(p.playlist_name) %}
+            <span class="playlist-excluded">{{ exclusions[p.playlist_name] }} excluded</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if not genre_nsp and not decade_nsp and not m3u_playlists %}
 <div class="empty-state">
-    <p>No playlists yet. Click "Generate Playlists" to create genre, special, and decade playlists.</p>
+    <p>No playlists yet. Click "Generate Playlists" to create genre, decade, and special playlists.</p>
 </div>
 {% endif %}
 
@@ -138,9 +118,9 @@ function genActions() {
             if (r.error) return `Error: ${r.error}`;
             const parts = [];
             if (r.genre_playlists) parts.push(`${r.genre_playlists} genre`);
-            if (r.special_playlists) parts.push(`${r.special_playlists} special`);
             if (r.decade_playlists) parts.push(`${r.decade_playlists} decade`);
-            parts.push(`${r.tracks_added} new tracks`);
+            if (r.special_playlists) parts.push(`${r.special_playlists} special`);
+            if (r.nsp_written) parts.push(`${r.nsp_written} nsp`);
             if (r.m3u_written) parts.push(`${r.m3u_written} m3u`);
             return parts.join(', ');
         },

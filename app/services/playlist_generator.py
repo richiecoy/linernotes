@@ -1,17 +1,17 @@
 """
 LinerNotes Playlist Generator
 
-All playlists are M3U files written to the playlist path.
-Navidrome auto-imports on library scan.
-
 Playlist types:
-  - Genre: one per resolved genre
-  - Decade: one per decade, excludes live/acoustic albums
-  - Live: all tracks from live albums
-  - Acoustic: all tracks from acoustic albums
+  - Genre: .nsp smart playlists (favorites only, Navidrome evaluates)
+  - Decade: .nsp smart playlists (all tracks in range, Navidrome evaluates)
+  - Live: M3U (from LinerNotes DB is_live flag)
+  - Acoustic: M3U (from LinerNotes DB is_acoustic flag)
 
-Exclusions managed in LinerNotes UI. Excluded tracks are
-omitted from playlist_tracks and M3U output.
+Genre/decade playlists are fully managed by Navidrome's smart playlist
+engine. LinerNotes just writes the rule files.
+
+Live/acoustic playlists use M3U with exclusion support managed in the
+LinerNotes UI.
 """
 import os
 import json
@@ -40,39 +40,53 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
                               progress_callback=None) -> dict:
     stats = {
         'genre_playlists': 0,
-        'special_playlists': 0,
         'decade_playlists': 0,
+        'special_playlists': 0,
+        'nsp_written': 0,
+        'm3u_written': 0,
         'tracks_added': 0,
         'tracks_excluded': 0,
         'tracks_already_in': 0,
-        'm3u_written': 0,
         'errors': 0,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'finished_at': None,
     }
 
-    # ── Genre tracks ──────────────────────────────────────────────────
+    os.makedirs(playlist_path, exist_ok=True)
+
+    # ── Cleanup: remove old genre/decade M3U files and DB entries ─────
+    await _cleanup_migrated_playlists(db, playlist_path)
+
+    # ── Genre smart playlists (.nsp) ──────────────────────────────────
     cursor = await db.execute("""
-        SELECT t.id as track_id, t.filename, t.title,
-               t.disc_number, t.track_number, t.duration_seconds,
-               a.name as artist_name, al.folder_name as album_folder,
-               al.year,
-               COALESCE(a.manual_override, a.resolved_genre) as genre
-        FROM tracks t
-        JOIN albums al ON t.album_id = al.id
-        JOIN artists a ON al.artist_id = a.id
+        SELECT DISTINCT COALESCE(a.manual_override, a.resolved_genre) as genre
+        FROM artists a
+        JOIN albums al ON al.artist_id = a.id
         WHERE al.in_library = 1
           AND COALESCE(a.manual_override, a.resolved_genre) IS NOT NULL
-        ORDER BY a.name, al.year, t.disc_number, t.track_number
+        ORDER BY genre
     """)
-    all_tracks = await cursor.fetchall()
-    logger.info("Generating playlists from %d tracks", len(all_tracks))
+    genres = [row['genre'] for row in await cursor.fetchall()]
 
-    genre_buckets = {}
-    for track in all_tracks:
-        genre_buckets.setdefault(track['genre'], []).append(track)
+    # ── Decade smart playlists (.nsp) ─────────────────────────────────
+    cursor = await db.execute("""
+        SELECT DISTINCT al.year
+        FROM albums al
+        WHERE al.in_library = 1 AND al.year IS NOT NULL
+    """)
+    years_present = set()
+    for row in await cursor.fetchall():
+        try:
+            years_present.add(int(str(row['year'])[:4]))
+        except (ValueError, TypeError):
+            pass
 
-    # ── Special playlists (Live, Acoustic) ────────────────────────────
+    active_decades = {}
+    for decade_name, (start, end) in DECADES.items():
+        if any(start <= y <= end for y in years_present):
+            active_decades[decade_name] = (start, end)
+
+    # ── Special playlists (Live, Acoustic) - M3U ──────────────────────
     special_buckets = {}
     for playlist_name, db_column in SPECIAL_PLAYLISTS.items():
         cursor = await db.execute(f"""
@@ -91,50 +105,65 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
         if tracks:
             special_buckets[playlist_name] = tracks
 
-    # ── Decade tracks (exclude live + acoustic) ───────────────────────
-    cursor = await db.execute("""
-        SELECT t.id as track_id, t.filename, t.title,
-               t.disc_number, t.track_number, t.duration_seconds,
-               a.name as artist_name, al.folder_name as album_folder,
-               al.year
-        FROM tracks t
-        JOIN albums al ON t.album_id = al.id
-        JOIN artists a ON al.artist_id = a.id
-        WHERE al.in_library = 1
-          AND al.is_live = 0
-          AND al.is_acoustic = 0
-        ORDER BY a.name, al.year, t.disc_number, t.track_number
-    """)
-    decade_buckets = {}
-    for track in await cursor.fetchall():
-        year_str = track['year']
-        if not year_str:
-            continue
-        try:
-            year = int(str(year_str)[:4])
-            for decade_name, (start, end) in DECADES.items():
-                if start <= year <= end:
-                    decade_buckets.setdefault(decade_name, []).append(track)
-                    break
-        except (ValueError, TypeError):
-            pass
+    # ── Progress tracking ─────────────────────────────────────────────
+    total = len(genres) + len(active_decades) + len(special_buckets)
+    current = 0
 
-    # ── Process all playlists ─────────────────────────────────────────
-    all_buckets = []
-    for name, tracks in sorted(genre_buckets.items()):
-        all_buckets.append(('genre', name, tracks))
-    for name, tracks in sorted(special_buckets.items()):
-        all_buckets.append(('special', name, tracks))
-    for name, tracks in sorted(decade_buckets.items()):
-        all_buckets.append(('decade', name, tracks))
-
-    total = len(all_buckets)
-    for i, (ptype, name, tracks) in enumerate(all_buckets):
+    # ── Write genre .nsp files ────────────────────────────────────────
+    for genre in genres:
+        current += 1
         if progress_callback:
-            progress_callback(i + 1, total, name)
+            progress_callback(current, total, genre)
+
+        nsp = {
+            "name": genre,
+            "comment": f"Favorited {genre} tracks",
+            "all": [
+                {"is": {"genre": genre}},
+                {"is": {"loved": True}}
+            ],
+            "sort": "artist,year,discNumber,trackNumber",
+            "order": "asc"
+        }
+
+        wrote = _write_nsp(playlist_path, genre, nsp)
+        if wrote:
+            stats['nsp_written'] += 1
+            stats['genre_playlists'] += 1
+            await _log_action(db, genre, 'generate_nsp', 0,
+                              {'type': 'genre', 'favorited': True})
+
+    # ── Write decade .nsp files ───────────────────────────────────────
+    for decade_name, (start, end) in sorted(active_decades.items()):
+        current += 1
+        if progress_callback:
+            progress_callback(current, total, decade_name)
+
+        nsp = {
+            "name": decade_name,
+            "comment": f"All tracks from {start}-{end}",
+            "all": [
+                {"inTheRange": {"year": [start, end]}}
+            ],
+            "sort": "artist,year,discNumber,trackNumber",
+            "order": "asc"
+        }
+
+        wrote = _write_nsp(playlist_path, decade_name, nsp)
+        if wrote:
+            stats['nsp_written'] += 1
+            stats['decade_playlists'] += 1
+            await _log_action(db, decade_name, 'generate_nsp', 0,
+                              {'type': 'decade', 'range': [start, end]})
+
+    # ── Write special M3U playlists ───────────────────────────────────
+    for name, tracks in sorted(special_buckets.items()):
+        current += 1
+        if progress_callback:
+            progress_callback(current, total, name)
 
         result = await _update_playlist(db, name, tracks)
-        stats[f'{ptype}_playlists'] += 1
+        stats['special_playlists'] += 1
         stats['tracks_added'] += result['added']
         stats['tracks_excluded'] += result['excluded']
         stats['tracks_already_in'] += result['already_in']
@@ -151,17 +180,54 @@ async def generate_playlists(db, music_path: str, playlist_path: str,
 
     stats['finished_at'] = datetime.now(timezone.utc).isoformat()
     logger.info(
-        "Playlist generation complete: %d genre, %d special, %d decade, "
-        "%d m3u, %d added, %d excluded",
-        stats['genre_playlists'], stats['special_playlists'],
-        stats['decade_playlists'], stats['m3u_written'],
+        "Playlist generation complete: %d genre nsp, %d decade nsp, "
+        "%d special m3u, %d added, %d excluded",
+        stats['genre_playlists'], stats['decade_playlists'],
+        stats['special_playlists'],
         stats['tracks_added'], stats['tracks_excluded']
     )
     return stats
 
 
+async def _cleanup_migrated_playlists(db, playlist_path: str):
+    """Remove old genre/decade M3U files and their DB entries.
+    These are now handled as .nsp smart playlists."""
+    cursor = await db.execute("SELECT DISTINCT playlist_name FROM playlist_tracks")
+    cleaned = 0
+    for row in await cursor.fetchall():
+        name = row['playlist_name']
+        if name in ('Live', 'Acoustic'):
+            continue
+        # Everything else is old genre or decade — clean up
+        await db.execute("DELETE FROM playlist_tracks WHERE playlist_name = ?", (name,))
+        await db.execute("DELETE FROM playlist_exclusions WHERE playlist_name = ?", (name,))
+        m3u_path = os.path.join(playlist_path, f"{name}.m3u")
+        if os.path.exists(m3u_path):
+            os.remove(m3u_path)
+            logger.info("Removed migrated M3U: %s", m3u_path)
+        cleaned += 1
+
+    if cleaned:
+        await db.commit()
+        logger.info("Cleaned up %d old M3U playlists migrated to NSP", cleaned)
+
+
+def _write_nsp(playlist_path: str, name: str, nsp_data: dict) -> bool:
+    """Write a Navidrome smart playlist (.nsp) file."""
+    try:
+        filepath = os.path.join(playlist_path, f"{name}.nsp")
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(nsp_data, f, indent=2)
+        logger.debug("Wrote NSP: %s", filepath)
+        return True
+    except Exception as e:
+        logger.error("Failed to write NSP for '%s': %s", name, e)
+        return False
+
+
 async def _update_playlist(db, playlist_name: str,
                            qualifying_tracks: list) -> dict:
+    """Incrementally update an M3U-backed playlist with exclusion support."""
     result = {'added': 0, 'excluded': 0, 'already_in': 0, 'total': 0}
 
     cursor = await db.execute(
@@ -201,6 +267,7 @@ async def _update_playlist(db, playlist_name: str,
 
 async def _write_m3u(db, playlist_name: str, music_path: str,
                      playlist_path: str) -> bool:
+    """Write an M3U playlist file for special playlists."""
     try:
         os.makedirs(playlist_path, exist_ok=True)
 

@@ -2,6 +2,7 @@
 LinerNotes Playlist Routes
 """
 import asyncio
+import json
 import logging
 import os
 from fastapi import APIRouter, Request
@@ -22,22 +23,51 @@ _gen_state = {
     "last_result": None,
 }
 
+DECADE_NAMES = ['1960s','1970s','1980s','1990s','2000s','2010s','2020s']
+
+
+def _scan_nsp_files(playlist_path: str) -> list:
+    """Scan playlist directory for .nsp files and parse them."""
+    nsp_playlists = []
+    if not playlist_path or not os.path.isdir(playlist_path):
+        return nsp_playlists
+
+    for fname in sorted(os.listdir(playlist_path)):
+        if not fname.endswith('.nsp'):
+            continue
+        filepath = os.path.join(playlist_path, fname)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            nsp_playlists.append({
+                'name': data.get('name', fname.replace('.nsp', '')),
+                'comment': data.get('comment', ''),
+                'filename': fname,
+                'rules': data,
+            })
+        except Exception as e:
+            logger.warning("Failed to read NSP %s: %s", fname, e)
+
+    return nsp_playlists
+
 
 @router.get("/playlists", response_class=HTMLResponse)
 async def playlists_page(request: Request):
     """Playlist management page."""
     db = await get_db()
     try:
-        # Get playlist summary
+        playlist_path = await get_setting("playlist_path", "/playlists")
+
+        # M3U playlists (Live, Acoustic) — from DB
         cursor = await db.execute("""
             SELECT playlist_name, COUNT(*) as track_count
             FROM playlist_tracks
             GROUP BY playlist_name
             ORDER BY playlist_name
         """)
-        playlists = await cursor.fetchall()
+        m3u_playlists = await cursor.fetchall()
 
-        # Get exclusion counts
+        # Exclusion counts for M3U playlists
         cursor = await db.execute("""
             SELECT playlist_name, COUNT(*) as count
             FROM playlist_exclusions
@@ -45,7 +75,19 @@ async def playlists_page(request: Request):
         """)
         exclusions = {row["playlist_name"]: row["count"] for row in await cursor.fetchall()}
 
-        # Get recent log entries
+        # NSP playlists (genre, decade) — from filesystem
+        nsp_playlists = _scan_nsp_files(playlist_path)
+
+        # Split NSP into genre vs decade
+        genre_nsp = []
+        decade_nsp = []
+        for nsp in nsp_playlists:
+            if nsp['name'] in DECADE_NAMES:
+                decade_nsp.append(nsp)
+            else:
+                genre_nsp.append(nsp)
+
+        # Recent log entries
         cursor = await db.execute("""
             SELECT * FROM playlist_log
             ORDER BY created_at DESC
@@ -54,21 +96,18 @@ async def playlists_page(request: Request):
         logs = await cursor.fetchall()
 
         # Stats
-        cursor = await db.execute("SELECT COUNT(*) as count FROM playlist_tracks")
-        total_assignments = (await cursor.fetchone())["count"]
-
-        cursor = await db.execute(
-            "SELECT COUNT(DISTINCT playlist_name) as count FROM playlist_tracks"
-        )
-        total_playlists = (await cursor.fetchone())["count"]
+        total_nsp = len(nsp_playlists)
+        total_m3u = len(m3u_playlists)
 
         return templates.TemplateResponse("playlists.html", {
             "request": request,
-            "playlists": playlists,
+            "genre_nsp": genre_nsp,
+            "decade_nsp": decade_nsp,
+            "m3u_playlists": m3u_playlists,
             "exclusions": exclusions,
             "logs": logs,
-            "total_playlists": total_playlists,
-            "total_assignments": total_assignments,
+            "total_nsp": total_nsp,
+            "total_m3u": total_m3u,
             "gen_state": _gen_state,
         })
     finally:
@@ -102,7 +141,7 @@ async def generator_status():
 
 @router.post("/playlists/{playlist_name}/exclude/{track_id}")
 async def exclude_track(playlist_name: str, track_id: int):
-    """Exclude a track from a playlist."""
+    """Exclude a track from an M3U playlist."""
     db = await get_db()
     try:
         await db.execute(
@@ -111,7 +150,6 @@ async def exclude_track(playlist_name: str, track_id: int):
                VALUES (?, ?, datetime('now'))""",
             (playlist_name, track_id)
         )
-        # Remove from playlist
         await db.execute(
             "DELETE FROM playlist_tracks WHERE playlist_name = ? AND track_id = ?",
             (playlist_name, track_id)
@@ -124,7 +162,7 @@ async def exclude_track(playlist_name: str, track_id: int):
 
 @router.post("/playlists/{playlist_name}/include/{track_id}")
 async def include_track(playlist_name: str, track_id: int):
-    """Remove a track exclusion."""
+    """Remove a track exclusion from an M3U playlist."""
     db = await get_db()
     try:
         await db.execute(
@@ -139,7 +177,7 @@ async def include_track(playlist_name: str, track_id: int):
 
 @router.get("/playlists/{playlist_name}", response_class=HTMLResponse)
 async def playlist_detail(request: Request, playlist_name: str):
-    """View tracks in a specific playlist."""
+    """View tracks in a specific M3U playlist."""
     db = await get_db()
     try:
         cursor = await db.execute("""
@@ -154,7 +192,6 @@ async def playlist_detail(request: Request, playlist_name: str):
         """, (playlist_name,))
         tracks = await cursor.fetchall()
 
-        # Get exclusions for this playlist
         cursor = await db.execute("""
             SELECT pe.track_id, t.title, t.filename,
                    a.name as artist_name, al.folder_name as album_folder
