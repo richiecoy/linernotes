@@ -89,7 +89,7 @@ def read_audio_metadata(filepath: str) -> dict:
             # Genre
             genre = tags.get('genre')
             if genre:
-                meta['genre'] = genre[0] if isinstance(genre, list) else str(genre)
+                meta['genre'] = '; '.join(genre) if isinstance(genre, list) else str(genre)
 
     except Exception as e:
         logger.warning("Failed to read metadata from %s: %s", filepath, e)
@@ -123,6 +123,7 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
         'artists_removed': 0,
         'albums_removed': 0,
         'mb_ghosts_removed': 0,
+        'tracks_removed': 0,
         'errors': 0,
         'started_at': datetime.now(timezone.utc).isoformat(),
         'finished_at': None,
@@ -336,6 +337,26 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
     if artists_removed or albums_removed:
         await db.commit()
 
+    # Cleanup: remove stale tracks whose files no longer exist
+    tracks_removed = 0
+    cursor = await db.execute("""
+        SELECT t.id, t.filename, al.folder_name, a.name
+        FROM tracks t
+        JOIN albums al ON t.album_id = al.id
+        JOIN artists a ON al.artist_id = a.id
+        WHERE al.in_library = 1
+    """)
+    for row in await cursor.fetchall():
+        filepath = os.path.join(music_path, row['name'], row['folder_name'], row['filename'])
+        if not os.path.isfile(filepath):
+            await db.execute("DELETE FROM tracks WHERE id = ?", (row['id'],))
+            tracks_removed += 1
+            logger.info("Removed stale track: %s/%s/%s",
+                        row['name'], row['folder_name'], row['filename'])
+
+    if tracks_removed:
+        await db.commit()
+
     # Cleanup: remove ghost MB albums (in_library=0 with no tracks)
     cursor = await db.execute("""
         DELETE FROM albums
@@ -349,15 +370,16 @@ async def scan_library(db, music_path: str, progress_callback=None) -> dict:
 
     stats['artists_removed'] = artists_removed
     stats['albums_removed'] = albums_removed
+    stats['tracks_removed'] = tracks_removed
     stats['mb_ghosts_removed'] = mb_ghosts_removed
 
     logger.info(
         "Scan complete: %d artists (%d new, %d removed), %d albums (%d new, %d removed), "
-        "%d tracks (%d new, %d updated), %d MB ghosts removed, %d errors",
+        "%d tracks (%d new, %d updated, %d removed), %d MB ghosts removed, %d errors",
         stats['artists_found'], stats['artists_new'], stats['artists_removed'],
         stats['albums_found'], stats['albums_new'], stats['albums_removed'],
         stats['tracks_found'], stats['tracks_new'], stats['tracks_updated'],
-        stats['mb_ghosts_removed'], stats['errors']
+        stats['tracks_removed'], stats['mb_ghosts_removed'], stats['errors']
     )
 
     return stats

@@ -14,14 +14,19 @@ logger = logging.getLogger("linernotes.enforcer")
 
 
 def read_genre_tag(filepath: str) -> str | None:
-    """Read the genre tag from an audio file."""
+    """Read the genre tag from an audio file.
+    Returns the full genre value as a single string.
+    FLAC multi-value tags are joined with '; '.
+    """
     try:
         audio = MutagenFile(filepath, easy=True)
         if audio is None:
             return None
         genre = audio.get('genre')
         if genre:
-            return genre[0] if isinstance(genre, list) else str(genre)
+            if isinstance(genre, list):
+                return '; '.join(genre)
+            return str(genre)
         return None
     except Exception as e:
         logger.warning("Failed to read genre from %s: %s", filepath, e)

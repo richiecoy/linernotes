@@ -20,6 +20,6 @@ MUSICBRAINZ_RATE_LIMIT = 1.1  # seconds between requests
 
 # App
 APP_NAME = "LinerNotes"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 APP_HOST = "0.0.0.0"
 APP_PORT = int(os.environ.get("LINERNOTES_PORT", "8299"))
